@@ -8,7 +8,6 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Shadow Rush</title>
-  <meta name="description" content="Shadow Rush — an addictive neon arcade game. Level up, unlock skins, collect coins!" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,10 +17,19 @@
 <body>
   <canvas id="gameCanvas"></canvas>
 
-  <!-- Countdown Overlay -->
+  <!-- Countdown -->
   <div id="countdown-overlay" class="fullscreen-overlay hidden">
     <div id="countdown-number">3</div>
     <div id="countdown-go" class="hidden">GO!</div>
+  </div>
+
+  <!-- Stage Clear -->
+  <div id="stage-clear-overlay" class="fullscreen-overlay hidden">
+    <div id="stage-clear-content">
+      <div id="stage-clear-label">STAGE CLEAR!</div>
+      <div id="stage-clear-number"></div>
+      <div id="stage-clear-bonus"></div>
+    </div>
   </div>
 
   <!-- HUD -->
@@ -38,120 +46,87 @@
         </div>
       </div>
       <div id="hud-center">
-        <div id="rule-timer-wrap">
-          <div id="rule-timer-bar"><div id="rule-timer-fill"></div></div>
-          <span id="rule-label"></span>
+        <div id="stage-info">
+          <span id="stage-label">STAGE 1</span>
+          <div id="stage-timer-bar"><div id="stage-timer-fill"></div></div>
+          <span id="stage-timer-text">20s</span>
         </div>
+        <div id="rule-banner" class="hidden"></div>
         <div id="event-banner" class="hidden"></div>
       </div>
       <div id="hud-right">
         <div id="coin-display">
-          <span id="coin-icon">◈</span>
+          <span class="coin-sym">◈</span>
           <span id="hud-coins">0</span>
         </div>
         <button id="pause-btn" aria-label="Pause">⏸</button>
       </div>
     </div>
-    <div id="hud-bottom">
-      <div id="xp-bar-wrap">
-        <span id="hud-level">LV 1</span>
-        <div id="xp-bar"><div id="xp-bar-fill"></div></div>
-        <span id="hud-xp-text">0 XP</span>
-      </div>
-    </div>
   </div>
 
-  <!-- Start / Home Screen -->
+  <!-- START / MENU -->
   <div id="start-screen" class="overlay">
     <div class="overlay-content start-content">
       <div class="game-logo">
-        <div class="logo-cube" id="logo-cube-el"></div>
+        <div class="logo-cube"></div>
         <h1>SHADOW<br/><span>RUSH</span></h1>
       </div>
 
       <div id="player-badge">
-        <div id="player-level-badge">LV <span id="menu-level">1</span></div>
-        <div id="player-xp-bar-wrap">
-          <div id="player-xp-bar"><div id="player-xp-fill"></div></div>
-        </div>
-        <div id="menu-best">BEST: <span id="best-score-val">0</span></div>
+        <div id="player-best">BEST STAGE: <span id="menu-best-stage">—</span></div>
+        <div id="player-highscore">HIGH SCORE: <span id="menu-highscore">0</span></div>
       </div>
 
       <button id="play-btn" class="btn btn-primary btn-pulse">▶ PLAY</button>
 
       <div class="menu-grid">
-        <button id="shop-btn"    class="menu-card">◈<br/><span>SKINS</span></button>
-        <button id="missions-btn" class="menu-card">🏆<br/><span>MISSIONS</span></button>
-        <button id="wheel-btn"   class="menu-card">🎡<br/><span>WHEEL</span></button>
-        <button id="stats-btn"   class="menu-card">📊<br/><span>STATS</span></button>
+        <button id="shop-btn"     class="menu-card">◈<br/><span>SKINS</span></button>
+        <button id="missions-btn" class="menu-card">🏆<br/><span>GOALS</span></button>
+        <button id="wheel-btn"    class="menu-card">🎡<br/><span>WHEEL</span></button>
+        <button id="stats-btn"    class="menu-card">📊<br/><span>STATS</span></button>
       </div>
 
-      <button id="daily-reward-btn" class="btn btn-gold hidden">🎁 DAILY LOGIN REWARD</button>
+      <button id="daily-reward-btn" class="btn btn-gold hidden">🎁 DAILY REWARD — +5 ◈</button>
     </div>
   </div>
 
-  <!-- Pause Menu -->
+  <!-- PAUSE -->
   <div id="pause-menu" class="overlay hidden">
     <div class="overlay-content">
       <h2>PAUSED</h2>
-      <div id="pause-score-display"></div>
-      <button id="resume-btn"    class="btn btn-primary">▶ RESUME</button>
-      <button id="restart-btn"   class="btn btn-secondary">↺ RESTART</button>
+      <div id="pause-info"></div>
+      <button id="resume-btn"     class="btn btn-primary">▶ RESUME</button>
+      <button id="restart-btn"    class="btn btn-secondary">↺ RESTART</button>
       <button id="pause-shop-btn" class="btn btn-secondary">◈ SKINS</button>
-      <button id="home-btn"      class="btn btn-ghost">⌂ HOME</button>
+      <button id="home-btn"       class="btn btn-ghost">⌂ HOME</button>
     </div>
   </div>
 
-  <!-- Game Over -->
+  <!-- GAME OVER -->
   <div id="game-over" class="overlay hidden">
     <div class="overlay-content gameover-content">
       <h2 class="game-over-title">GAME OVER</h2>
-
       <div id="final-stats">
-        <div class="stat-row">
-          <span class="stat-label">SCORE</span>
-          <span id="final-score"  class="stat-value neon-cyan">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">BEST</span>
-          <span id="final-best"   class="stat-value neon-purple">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">COINS</span>
-          <span id="final-coins"  class="stat-value neon-gold">0</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">XP EARNED</span>
-          <span id="final-xp"     class="stat-value neon-green">0</span>
-        </div>
+        <div class="stat-row"><span class="stat-label">SCORE</span>     <span id="final-score"  class="stat-value neon-cyan">0</span></div>
+        <div class="stat-row"><span class="stat-label">BEST</span>      <span id="final-best"   class="stat-value neon-purple">0</span></div>
+        <div class="stat-row"><span class="stat-label">STAGE</span>     <span id="final-stage"  class="stat-value neon-gold">1</span></div>
+        <div class="stat-row"><span class="stat-label">COINS</span>     <span id="final-coins"  class="stat-value neon-green">0</span></div>
         <div id="new-best-badge" class="hidden">🏆 NEW BEST!</div>
       </div>
-
-      <div id="xp-progress-bar-wrap">
-        <div class="xp-label-row">
-          <span id="go-level-text">LV 1</span>
-          <span id="go-xp-text">0 / 0 XP</span>
-        </div>
-        <div id="go-xp-bar"><div id="go-xp-fill"></div></div>
-      </div>
-
-      <div id="mission-progress-list"></div>
-
       <button id="gameover-restart-btn" class="btn btn-primary btn-pulse">↺ PLAY AGAIN</button>
       <div class="gameover-actions">
-        <button id="gameover-shop-btn"  class="btn btn-secondary">◈ SKINS</button>
-        <button id="gameover-home-btn"  class="btn btn-ghost">⌂ HOME</button>
+        <button id="gameover-shop-btn" class="btn btn-secondary">◈ SKINS</button>
+        <button id="gameover-home-btn" class="btn btn-ghost">⌂ HOME</button>
       </div>
     </div>
   </div>
 
-  <!-- Skin Shop -->
+  <!-- SKIN SHOP -->
   <div id="shop-modal" class="overlay hidden">
     <div class="overlay-content shop-content">
       <h2>◈ SKINS</h2>
       <div id="shop-header">
         <div id="shop-coins-display">◈ <span id="shop-coins">0</span></div>
-        <div id="shop-level-display">LV <span id="shop-level">1</span></div>
       </div>
       <div id="shop-tabs">
         <button class="shop-tab active" data-tab="all">ALL</button>
@@ -163,46 +138,43 @@
     </div>
   </div>
 
-  <!-- Missions & Achievements -->
+  <!-- GOALS (Missions + Achievements) -->
   <div id="missions-modal" class="overlay hidden">
     <div class="overlay-content missions-content">
-      <h2>🏆 MISSIONS</h2>
+      <h2>🏆 GOALS</h2>
       <div id="missions-tabs">
-        <button class="missions-tab active" data-tab="daily">DAILY</button>
-        <button class="missions-tab" data-tab="weekly">WEEKLY</button>
+        <button class="missions-tab active" data-tab="missions">MISSIONS</button>
         <button class="missions-tab" data-tab="achievements">BADGES</button>
       </div>
-      <div id="daily-missions-panel"  class="missions-panel active-panel"></div>
-      <div id="weekly-missions-panel" class="missions-panel"></div>
-      <div id="achievements-panel"    class="missions-panel"></div>
+      <div id="missions-panel"     class="missions-panel active-panel"></div>
+      <div id="achievements-panel" class="missions-panel"></div>
       <button id="close-missions-btn" class="btn btn-ghost">✕ CLOSE</button>
     </div>
   </div>
 
-  <!-- Daily Login Reward -->
+  <!-- DAILY REWARD -->
   <div id="daily-modal" class="overlay hidden">
     <div class="overlay-content">
-      <h2>🎁 DAILY LOGIN</h2>
-      <div id="streak-display">
-        <span id="streak-fire">🔥</span>
-        <span id="streak-count">0 DAY STREAK</span>
-      </div>
+      <h2>🎁 DAILY REWARD</h2>
+      <div id="daily-streak-display"></div>
       <div id="daily-calendar"></div>
-      <div id="daily-reward-preview">
+      <div class="daily-reward-preview">
         <div class="reward-coin-icon">◈</div>
-        <div id="daily-reward-amount" class="reward-amount">+50</div>
+        <div id="daily-reward-amount" class="reward-amount">+5</div>
+        <div id="daily-reward-desc">Come back tomorrow for more!</div>
       </div>
-      <button id="claim-reward-btn" class="btn btn-gold">CLAIM REWARD</button>
+      <button id="claim-reward-btn" class="btn btn-gold">CLAIM 5 ◈</button>
+      <button id="close-daily-btn"  class="btn btn-ghost">CLOSE</button>
     </div>
   </div>
 
-  <!-- Lucky Wheel -->
+  <!-- LUCKY WHEEL -->
   <div id="wheel-modal" class="overlay hidden">
     <div class="overlay-content">
       <h2>🎡 LUCKY WHEEL</h2>
       <div id="wheel-cooldown-display" class="hidden"></div>
       <div id="wheel-wrap">
-        <canvas id="wheel-canvas" width="300" height="300"></canvas>
+        <canvas id="wheel-canvas" width="280" height="280"></canvas>
         <div id="wheel-pointer">▼</div>
       </div>
       <div id="wheel-result" class="hidden"></div>
@@ -211,37 +183,26 @@
     </div>
   </div>
 
-  <!-- Statistics -->
+  <!-- STATS -->
   <div id="stats-modal" class="overlay hidden">
     <div class="overlay-content">
-      <h2>📊 STATISTICS</h2>
+      <h2>📊 STATS</h2>
       <div id="stats-grid"></div>
       <button id="close-stats-btn" class="btn btn-ghost">✕ CLOSE</button>
     </div>
   </div>
 
-  <!-- Level Up Modal -->
-  <div id="levelup-modal" class="fullscreen-overlay hidden">
-    <div id="levelup-content">
-      <div id="levelup-glow"></div>
-      <div id="levelup-label">LEVEL UP!</div>
-      <div id="levelup-number">2</div>
-      <div id="levelup-reward"></div>
-      <button id="levelup-ok" class="btn btn-primary">AWESOME!</button>
-    </div>
-  </div>
-
-  <!-- Rule Change Notification -->
+  <!-- Rule Notification -->
   <div id="rule-notification" class="rule-notification hidden">
     <div id="rule-notification-text"></div>
   </div>
 
-  <!-- Special Event Banner -->
+  <!-- Special Event Toast -->
   <div id="special-event-toast" class="special-event-toast hidden">
     <div id="special-event-text"></div>
   </div>
 
-  <!-- Toast Notification (achievement / mission) -->
+  <!-- Achievement Toast -->
   <div id="achievement-toast" class="achievement-toast hidden">
     <span class="achievement-icon">🏆</span>
     <div class="achievement-text">
@@ -249,8 +210,6 @@
       <div class="achievement-desc"></div>
     </div>
   </div>
-
-  <!-- Coin Pop Label (canvas-drawn coin collect) -->
 
   <script type="module" src="/src/game.js"></script>
 </body>
