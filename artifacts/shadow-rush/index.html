@@ -59,7 +59,10 @@
           <span class="coin-sym">◈</span>
           <span id="hud-coins">0</span>
         </div>
-        <button id="pause-btn" aria-label="Pause">⏸</button>
+        <div id="hud-btns">
+          <button id="hud-mute-btn" aria-label="Mute">🔊</button>
+          <button id="pause-btn" aria-label="Pause">⏸</button>
+        </div>
       </div>
     </div>
   </div>
@@ -67,6 +70,8 @@
   <!-- START / MENU -->
   <div id="start-screen" class="overlay">
     <div class="overlay-content start-content">
+      <button id="settings-btn" class="settings-corner-btn" aria-label="Settings">⚙</button>
+
       <div class="game-logo">
         <div class="logo-cube"></div>
         <h1>SHADOW<br/><span>RUSH</span></h1>
@@ -95,10 +100,11 @@
     <div class="overlay-content">
       <h2>PAUSED</h2>
       <div id="pause-info"></div>
-      <button id="resume-btn"     class="btn btn-primary">▶ RESUME</button>
-      <button id="restart-btn"    class="btn btn-secondary">↺ RESTART</button>
-      <button id="pause-shop-btn" class="btn btn-secondary">◈ SKINS</button>
-      <button id="home-btn"       class="btn btn-ghost">⌂ HOME</button>
+      <button id="resume-btn"      class="btn btn-primary">▶ RESUME</button>
+      <button id="restart-btn"     class="btn btn-secondary">↺ RESTART</button>
+      <button id="pause-shop-btn"  class="btn btn-secondary">◈ SKINS</button>
+      <button id="pause-settings-btn" class="btn btn-secondary">⚙ AUDIO</button>
+      <button id="home-btn"        class="btn btn-ghost">⌂ HOME</button>
     </div>
   </div>
 
@@ -107,10 +113,10 @@
     <div class="overlay-content gameover-content">
       <h2 class="game-over-title">GAME OVER</h2>
       <div id="final-stats">
-        <div class="stat-row"><span class="stat-label">SCORE</span>     <span id="final-score"  class="stat-value neon-cyan">0</span></div>
-        <div class="stat-row"><span class="stat-label">BEST</span>      <span id="final-best"   class="stat-value neon-purple">0</span></div>
-        <div class="stat-row"><span class="stat-label">STAGE</span>     <span id="final-stage"  class="stat-value neon-gold">1</span></div>
-        <div class="stat-row"><span class="stat-label">COINS</span>     <span id="final-coins"  class="stat-value neon-green">0</span></div>
+        <div class="stat-row"><span class="stat-label">SCORE</span>  <span id="final-score"  class="stat-value neon-cyan">0</span></div>
+        <div class="stat-row"><span class="stat-label">BEST</span>   <span id="final-best"   class="stat-value neon-purple">0</span></div>
+        <div class="stat-row"><span class="stat-label">STAGE</span>  <span id="final-stage"  class="stat-value neon-gold">1</span></div>
+        <div class="stat-row"><span class="stat-label">COINS</span>  <span id="final-coins"  class="stat-value neon-green">0</span></div>
         <div id="new-best-badge" class="hidden">🏆 NEW BEST!</div>
       </div>
       <button id="gameover-restart-btn" class="btn btn-primary btn-pulse">↺ PLAY AGAIN</button>
@@ -118,6 +124,38 @@
         <button id="gameover-shop-btn" class="btn btn-secondary">◈ SKINS</button>
         <button id="gameover-home-btn" class="btn btn-ghost">⌂ HOME</button>
       </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS / AUDIO -->
+  <div id="settings-modal" class="overlay hidden">
+    <div class="overlay-content settings-content">
+      <h2>⚙ AUDIO</h2>
+
+      <div class="setting-group">
+        <div class="setting-row">
+          <span class="setting-label">MASTER VOLUME</span>
+          <span id="volume-val" class="setting-val">70%</span>
+        </div>
+        <input type="range" id="volume-slider" min="0" max="100" value="70" class="vol-slider" />
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-row">
+          <span class="setting-label">MUSIC</span>
+          <button id="music-toggle" class="toggle-btn on">ON</button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">SOUND FX</span>
+          <button id="sfx-toggle" class="toggle-btn on">ON</button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">MUTE ALL</span>
+          <button id="mute-all-btn" class="toggle-btn">OFF</button>
+        </div>
+      </div>
+
+      <button id="close-settings-btn" class="btn btn-ghost">✕ CLOSE</button>
     </div>
   </div>
 
