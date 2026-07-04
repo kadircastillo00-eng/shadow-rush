@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Shadow Rush"
+version = "1.0.0"
+id = "artifacts/shadow-rush"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23232
+
+[services.development]
+run = "pnpm --filter @workspace/shadow-rush run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/shadow-rush", "run", "build" ]
+publicDir = "artifacts/shadow-rush/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23232"
+BASE_PATH = "/"

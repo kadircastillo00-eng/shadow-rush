@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#050510" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Shadow Rush</title>
+  <meta name="description" content="Shadow Rush — an addictive neon mobile game. Dodge obstacles, collect coins, unlock skins!" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/game.css" />
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="hud-left">
+      <div id="score-display">
+        <span class="hud-label">SCORE</span>
+        <span id="score">0</span>
+      </div>
+      <div id="combo-display">
+        <span id="combo-text">x1</span>
+        <span class="hud-label">COMBO</span>
+      </div>
+    </div>
+    <div id="hud-center">
+      <div id="rule-timer-wrap">
+        <div id="rule-timer-bar"><div id="rule-timer-fill"></div></div>
+        <span id="rule-label"></span>
+      </div>
+    </div>
+    <div id="hud-right">
+      <div id="coin-display">
+        <span id="coin-icon">◈</span>
+        <span id="hud-coins">0</span>
+      </div>
+      <button id="pause-btn" aria-label="Pause">⏸</button>
+    </div>
+  </div>
+
+  <!-- Start Screen -->
+  <div id="start-screen" class="overlay">
+    <div class="overlay-content">
+      <div class="game-logo">
+        <div class="logo-cube"></div>
+        <h1>SHADOW<br/><span>RUSH</span></h1>
+      </div>
+      <div id="best-score-display"></div>
+      <button id="play-btn" class="btn btn-primary btn-pulse">TAP TO PLAY</button>
+      <div class="start-actions">
+        <button id="shop-btn" class="btn btn-secondary">◈ SKINS</button>
+        <button id="missions-btn" class="btn btn-secondary">🏆 MISSIONS</button>
+      </div>
+      <button id="daily-reward-btn" class="btn btn-gold hidden">🎁 DAILY REWARD</button>
+    </div>
+  </div>
+
+  <!-- Pause Menu -->
+  <div id="pause-menu" class="overlay hidden">
+    <div class="overlay-content">
+      <h2>PAUSED</h2>
+      <div id="pause-score-display"></div>
+      <button id="resume-btn" class="btn btn-primary">▶ RESUME</button>
+      <button id="restart-btn" class="btn btn-secondary">↺ RESTART</button>
+      <button id="pause-shop-btn" class="btn btn-secondary">◈ SKINS</button>
+      <button id="home-btn" class="btn btn-ghost">⌂ HOME</button>
+    </div>
+  </div>
+
+  <!-- Game Over -->
+  <div id="game-over" class="overlay hidden">
+    <div class="overlay-content">
+      <h2 class="game-over-title">GAME OVER</h2>
+      <div id="final-stats">
+        <div class="stat-row">
+          <span class="stat-label">SCORE</span>
+          <span id="final-score" class="stat-value neon-cyan">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">BEST</span>
+          <span id="final-best" class="stat-value neon-purple">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">COINS EARNED</span>
+          <span id="final-coins" class="stat-value neon-gold">0</span>
+        </div>
+        <div id="new-best-badge" class="hidden">🏆 NEW BEST!</div>
+      </div>
+      <div id="mission-progress-list"></div>
+      <button id="gameover-restart-btn" class="btn btn-primary btn-pulse">↺ PLAY AGAIN</button>
+      <div class="gameover-actions">
+        <button id="gameover-shop-btn" class="btn btn-secondary">◈ SKINS</button>
+        <button id="gameover-home-btn" class="btn btn-ghost">⌂ HOME</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skin Shop -->
+  <div id="shop-modal" class="overlay hidden">
+    <div class="overlay-content shop-content">
+      <h2>◈ SKINS</h2>
+      <div id="shop-coins-display">Your coins: <span id="shop-coins">0</span> ◈</div>
+      <div id="skin-grid"></div>
+      <button id="close-shop-btn" class="btn btn-ghost">✕ CLOSE</button>
+    </div>
+  </div>
+
+  <!-- Missions & Achievements Modal -->
+  <div id="missions-modal" class="overlay hidden">
+    <div class="overlay-content missions-content">
+      <h2>🏆 MISSIONS</h2>
+      <div id="missions-list"></div>
+      <h3 class="section-heading">ACHIEVEMENTS</h3>
+      <div id="achievements-list"></div>
+      <button id="close-missions-btn" class="btn btn-ghost">✕ CLOSE</button>
+    </div>
+  </div>
+
+  <!-- Daily Reward Modal -->
+  <div id="daily-modal" class="overlay hidden">
+    <div class="overlay-content">
+      <h2>🎁 DAILY REWARD</h2>
+      <div class="daily-reward-box">
+        <div class="reward-coin-icon">◈</div>
+        <div id="daily-reward-amount" class="reward-amount">+50</div>
+        <p>Come back tomorrow for more!</p>
+      </div>
+      <button id="claim-reward-btn" class="btn btn-gold">CLAIM REWARD</button>
+    </div>
+  </div>
+
+  <!-- Rule Change Notification -->
+  <div id="rule-notification" class="rule-notification hidden">
+    <div id="rule-notification-text"></div>
+  </div>
+
+  <!-- Achievement Toast -->
+  <div id="achievement-toast" class="achievement-toast hidden">
+    <span class="achievement-icon">🏆</span>
+    <div class="achievement-text">
+      <div class="achievement-name"></div>
+      <div class="achievement-desc"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/game.js"></script>
+</body>
+</html>
