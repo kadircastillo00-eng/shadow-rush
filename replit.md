@@ -1,6 +1,6 @@
-# [Project name]
+# Shadow Rush
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A fast-paced mobile-optimized arcade game where players guide a glowing cube through increasingly difficult obstacle courses across 50+ stages.
 
 ## Run & Operate
 

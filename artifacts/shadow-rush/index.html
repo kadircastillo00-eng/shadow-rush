@@ -132,6 +132,7 @@
     <div class="overlay-content settings-content">
       <h2>⚙ AUDIO</h2>
 
+      <!-- Master Volume -->
       <div class="setting-group">
         <div class="setting-row">
           <span class="setting-label">MASTER VOLUME</span>
@@ -140,6 +141,21 @@
         <input type="range" id="volume-slider" min="0" max="100" value="70" class="vol-slider" />
       </div>
 
+      <!-- Music & SFX Volume -->
+      <div class="setting-group">
+        <div class="setting-row">
+          <span class="setting-label">MUSIC VOLUME</span>
+          <span id="music-vol-val" class="setting-val">80%</span>
+        </div>
+        <input type="range" id="music-vol-slider" min="0" max="100" value="80" class="vol-slider" />
+        <div class="setting-row" style="margin-top:8px;">
+          <span class="setting-label">SFX VOLUME</span>
+          <span id="sfx-vol-val" class="setting-val">85%</span>
+        </div>
+        <input type="range" id="sfx-vol-slider" min="0" max="100" value="85" class="vol-slider" />
+      </div>
+
+      <!-- Toggles -->
       <div class="setting-group">
         <div class="setting-row">
           <span class="setting-label">MUSIC</span>

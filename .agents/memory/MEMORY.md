@@ -1,0 +1,1 @@
+- [Shadow Rush audio architecture](shadow-rush-audio.md) — music bus separates BGM fades from SFX; _mg() for music, _g() for SFX; _bass/_melody had g.gain.gain double-indirection bug in original

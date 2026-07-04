@@ -108,21 +108,26 @@ function vibrate(p){ try{navigator.vibrate?.(p);}catch{} }
 class AudioManager {
   constructor() {
     // Persisted prefs
-    this._vol     = parseFloat(localStorage.getItem('sr_vol')   || '0.7');
-    this._muted   = localStorage.getItem('sr_muted')  === 'true';
-    this._music   = localStorage.getItem('sr_music')  !== 'false';
-    this._sfx     = localStorage.getItem('sr_sfx')    !== 'false';
+    this._vol      = parseFloat(localStorage.getItem('sr_vol')       || '0.7');
+    this._musicVol = parseFloat(localStorage.getItem('sr_music_vol') || '0.8');
+    this._sfxVol   = parseFloat(localStorage.getItem('sr_sfx_vol')   || '0.85');
+    this._muted    = localStorage.getItem('sr_muted')  === 'true';
+    this._music    = localStorage.getItem('sr_music')  !== 'false';
+    this._sfx      = localStorage.getItem('sr_sfx')    !== 'false';
 
     // Runtime state
     this.ctx        = null;   // AudioContext (created on first unlock)
-    this._master    = null;   // master GainNode
+    this._master    = null;   // master GainNode  (mute/unmute + overall vol)
+    this._musicBus  = null;   // music GainNode   (music vol + fade transitions)
     this._unlocked  = false;
-    this._mode      = 'off';  // 'off' | 'menu' | 'game'
+    this._mode      = 'off';  // 'off' | 'menu' | 'game' | 'gameover' | 'victory'
     this._seqTid    = null;
     this._step      = 0;
     this._nextT     = 0;
     this._stage     = 1;
-    this._nodePool  = [];     // nodes to stop on stopBGM
+    this._nodePool  = [];     // BGM sequencer nodes to stop on stopBGM
+    this._jinglePool= [];     // jingle nodes
+    this._fadeTid   = null;   // timeout for delayed node cleanup after fade
   }
 
   // ── MOBILE UNLOCK ──────────────────────────────────────
@@ -131,12 +136,34 @@ class AudioManager {
     if (this._unlocked) return;
     try {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Master gain: overall volume + mute
       this._master = this.ctx.createGain();
       this._master.gain.value = this._muted ? 0 : this._vol;
       this._master.connect(this.ctx.destination);
+
+      // Music bus: sits between BGM nodes and master — used for
+      // independent music volume and smooth fade transitions
+      this._musicBus = this.ctx.createGain();
+      this._musicBus.gain.value = this._music ? this._musicVol : 0;
+      this._musicBus.connect(this._master);
+
       // iOS needs an explicit resume
       if (this.ctx.state === 'suspended') this.ctx.resume();
       this._unlocked = true;
+
+      // Mobile optimization: suspend AudioContext when tab/app is hidden,
+      // resume when it comes back — saves CPU and battery on mobile
+      document.addEventListener('visibilitychange', () => {
+        if (!this._ok()) return;
+        if (document.hidden) {
+          this.ctx.suspend().catch(() => {});
+        } else {
+          this.ctx.resume().catch(() => {});
+          // Resync sequencer to now to avoid a flood of catch-up notes
+          this._nextT = this.ctx.currentTime + 0.05;
+        }
+      });
     } catch(e) { console.warn('AudioContext failed:', e); }
   }
 
@@ -152,17 +179,45 @@ class AudioManager {
     this._muted = m; localStorage.setItem('sr_muted', m);
     if (this._master) this._master.gain.value = m ? 0 : this._vol;
   }
-  setMusic(b) { this._music = b; localStorage.setItem('sr_music', b); if(!b) this.stopBGM(); }
+  setMusic(b) {
+    this._music = b; localStorage.setItem('sr_music', b);
+    if (!b) {
+      this.stopBGM(0.3);
+    } else if (this._musicBus && this._ok() && !this._muted) {
+      this._musicBus.gain.cancelScheduledValues(this._now());
+      this._musicBus.gain.setValueAtTime(this._musicVol, this._now());
+    }
+  }
   setSFX(b)   { this._sfx   = b; localStorage.setItem('sr_sfx',   b); }
   getMuted()  { return this._muted; }
   getVol()    { return this._vol; }
   getMusic()  { return this._music; }
   getSFX()    { return this._sfx; }
 
+  // Separate music volume (0–1) — controls the music bus independently
+  setMusicVol(v) {
+    this._musicVol = v; localStorage.setItem('sr_music_vol', v);
+    if (this._musicBus && this._ok() && !this._muted && this._music) {
+      this._musicBus.gain.cancelScheduledValues(this._now());
+      this._musicBus.gain.setValueAtTime(v, this._now());
+    }
+  }
+  getMusicVol() { return this._musicVol; }
+
+  // Separate SFX volume (0–1) — applied when SFX gain nodes are created
+  setSfxVol(v) { this._sfxVol = v; localStorage.setItem('sr_sfx_vol', v); }
+  getSfxVol()  { return this._sfxVol; }
+
   // ── GRAPH HELPERS ──────────────────────────────────────
-  _g(vol = 1) {          // create gain connected to master
-    const g = this.ctx.createGain(); g.gain.value = vol;
+  // SFX gain — connects to master (respects sfxVol multiplier)
+  _g(vol = 1) {
+    const g = this.ctx.createGain(); g.gain.value = vol * this._sfxVol;
     g.connect(this._master); return g;
+  }
+  // Music gain — connects to musicBus (faded/controlled independently)
+  _mg(vol = 1) {
+    const g = this.ctx.createGain(); g.gain.value = vol;
+    g.connect(this._musicBus); return g;
   }
   _osc(freq, type, t, dur, vol, out) {
     const o = this.ctx.createOscillator(), g = this.ctx.createGain();
@@ -287,29 +342,215 @@ class AudioManager {
   // ── BACKGROUND MUSIC ───────────────────────────────────
   setStage(s) { this._stage = s; }
 
+  // Smooth crossfade into menu BGM
   startMenuBGM() {
     if (!this._ok() || !this._music) return;
-    this.stopBGM();
-    this._mode = 'menu';
-    this._step = 0;
-    this._nextT = this._now() + 0.05;
-    this._seqLoop();
+    const wasOff = this._mode === 'off';
+    this._stopBGMNodes(wasOff ? 0 : 0.3, () => {
+      if (!this._ok() || !this._music) return;
+      this._mode = 'menu';
+      this._step = 0;
+      this._nextT = this._now() + 0.05;
+      this._fadeInMusic(0.55);
+      this._seqLoop();
+    });
   }
 
+  // Smooth crossfade into game BGM
   startGameBGM() {
     if (!this._ok() || !this._music) return;
-    this.stopBGM();
-    this._mode = 'game';
-    this._step = 0;
-    this._nextT = this._now() + 0.05;
-    this._seqLoop();
+    const wasOff = this._mode === 'off';
+    this._stopBGMNodes(wasOff ? 0 : 0.25, () => {
+      if (!this._ok() || !this._music) return;
+      this._mode = 'game';
+      this._step = 0;
+      this._nextT = this._now() + 0.05;
+      this._fadeInMusic(0.4);
+      this._seqLoop();
+    });
   }
 
-  stopBGM() {
+  // Public stopBGM — fades out then clears nodes
+  stopBGM(fadeTime = 0.35) {
+    clearTimeout(this._fadeTid);
+    this._stopBGMNodes(fadeTime);
+  }
+
+  // Internal: fade out music bus then stop nodes (optional callback when done)
+  _stopBGMNodes(fadeTime = 0.35, onDone = null) {
     this._mode = 'off';
     clearTimeout(this._seqTid); this._seqTid = null;
-    this._nodePool.forEach(n => { try{n.stop();}catch{} });
-    this._nodePool = [];
+    clearTimeout(this._fadeTid);
+
+    if (this._musicBus && this._ok() && fadeTime > 0) {
+      const t = this._now();
+      this._musicBus.gain.cancelScheduledValues(t);
+      this._musicBus.gain.setValueAtTime(this._musicBus.gain.value || 0.001, t);
+      this._musicBus.gain.linearRampToValueAtTime(0.0001, t + fadeTime);
+      this._fadeTid = setTimeout(() => {
+        this._nodePool.forEach(n => { try { n.stop(); } catch {} });
+        this._nodePool = [];
+        if (onDone) onDone();
+      }, (fadeTime + 0.08) * 1000);
+    } else {
+      this._nodePool.forEach(n => { try { n.stop(); } catch {} });
+      this._nodePool = [];
+      if (onDone) onDone();
+    }
+  }
+
+  // Fade music bus gain UP to musicVol over `dur` seconds
+  _fadeInMusic(dur = 0.4) {
+    if (!this._musicBus || !this._ok()) return;
+    const t = this._now();
+    this._musicBus.gain.cancelScheduledValues(t);
+    this._musicBus.gain.setValueAtTime(0.0001, t);
+    this._musicBus.gain.linearRampToValueAtTime(this._musicVol, t + dur);
+  }
+
+  // ── GAME OVER JINGLE (~4.5 s) ──────────────────────────
+  // A descending minor lament — played after player dies.
+  // Returns total ms so callers know when to start menu BGM.
+  playGameOverJingle() {
+    if (!this._ok() || !this._music) return 0;
+    // Stop any current BGM quickly
+    this._stopBGMNodes(0.12);
+
+    // Short delay so the die SFX isn't masked
+    const DELAY = 0.30;
+    const TOTAL_MS = 5200;
+
+    setTimeout(() => {
+      if (!this._ok()) return;
+      const t = this._now() + 0.04;
+      // Jingle bus (routed through musicBus)
+      const bus = this._mg(0.0001);
+      bus.gain.linearRampToValueAtTime(this._musicVol * 0.85, t + 0.35);
+
+      // ── Descending melody in A-minor ──────────────────────
+      // Notes: G4→F4→E♭4→D4→C4→A3  (slow, mournful)
+      const melody = [
+        [392.0, 0.00, 0.70, 0.22],  // G4
+        [349.2, 0.62, 0.70, 0.20],  // F4
+        [311.1, 1.22, 0.70, 0.19],  // Eb4
+        [293.7, 1.82, 0.70, 0.18],  // D4
+        [261.6, 2.40, 0.80, 0.18],  // C4
+        [220.0, 3.10, 1.40, 0.22],  // A3 (hold + fade)
+      ];
+      melody.forEach(([freq, dt, dur, vol]) => {
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.type = 'sine'; o.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, t + dt);
+        g.gain.linearRampToValueAtTime(vol, t + dt + 0.06);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dt + dur);
+        o.connect(g); g.connect(bus);
+        o.start(t + dt); o.stop(t + dt + dur + 0.06);
+        this._jinglePool.push(o);
+      });
+
+      // ── Low mournful pad (Am chord: A2-C3-E3) ─────────────
+      [[110.0, -3], [130.8, 0], [164.8, +4]].forEach(([freq, detune]) => {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sine'; o.frequency.value = freq;
+        o.detune.value = detune;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(0.11, t + 0.7);
+        g.gain.setValueAtTime(0.11, t + 3.5);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 5.0);
+        o.connect(g); g.connect(bus);
+        o.start(t); o.stop(t + 5.1);
+        this._jinglePool.push(o);
+      });
+
+      // ── Subtle bass rumble ─────────────────────────────────
+      const br = this.ctx.createOscillator(), bg = this.ctx.createGain();
+      const bf = this.ctx.createBiquadFilter();
+      br.type = 'sine'; br.frequency.value = 55;
+      bf.type = 'lowpass'; bf.frequency.value = 140;
+      bg.gain.setValueAtTime(0.0001, t);
+      bg.gain.linearRampToValueAtTime(0.14, t + 0.5);
+      bg.gain.setValueAtTime(0.14, t + 3.8);
+      bg.gain.exponentialRampToValueAtTime(0.0001, t + 5.1);
+      br.connect(bf); bf.connect(bg); bg.connect(bus);
+      br.start(t); br.stop(t + 5.2);
+      this._jinglePool.push(br);
+
+      // Fade out the jingle bus at the end
+      bus.gain.setValueAtTime(this._musicVol * 0.85, t + 4.0);
+      bus.gain.linearRampToValueAtTime(0.0001, t + 5.1);
+    }, DELAY * 1000);
+
+    return TOTAL_MS;
+  }
+
+  // ── VICTORY JINGLE (~2.8 s) ────────────────────────────
+  // A bright triumphant fanfare — played on new high score.
+  // Returns total ms so callers know when to start menu BGM.
+  playVictoryJingle() {
+    if (!this._ok() || !this._music) return 0;
+    this._stopBGMNodes(0.12);
+
+    const DELAY = 0.20;
+    const TOTAL_MS = 3800;
+
+    setTimeout(() => {
+      if (!this._ok()) return;
+      const t = this._now() + 0.04;
+      const bus = this._mg(0.0001);
+      bus.gain.linearRampToValueAtTime(this._musicVol, t + 0.15);
+
+      // ── Rising fanfare in C-major ─────────────────────────
+      // C4→E4→G4→C5→E5 with harmonics
+      const fanfare = [
+        [261.6, 0.00, 0.22, 0.25],  // C4
+        [329.6, 0.18, 0.22, 0.24],  // E4
+        [392.0, 0.35, 0.22, 0.23],  // G4
+        [523.3, 0.52, 0.28, 0.26],  // C5
+        [659.3, 0.78, 0.55, 0.28],  // E5
+        [784.0, 1.28, 0.90, 0.22],  // G5 (resolve)
+      ];
+      fanfare.forEach(([freq, dt, dur, vol]) => {
+        // Main tone
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sine'; o.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, t + dt);
+        g.gain.linearRampToValueAtTime(vol, t + dt + 0.04);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dt + dur);
+        o.connect(g); g.connect(bus);
+        o.start(t + dt); o.stop(t + dt + dur + 0.06);
+        this._jinglePool.push(o);
+        // Octave shimmer
+        const o2 = this.ctx.createOscillator(), g2 = this.ctx.createGain();
+        o2.type = 'triangle'; o2.frequency.value = freq * 2;
+        g2.gain.setValueAtTime(0.0001, t + dt + 0.02);
+        g2.gain.linearRampToValueAtTime(vol * 0.3, t + dt + 0.07);
+        g2.gain.exponentialRampToValueAtTime(0.0001, t + dt + dur * 0.7);
+        o2.connect(g2); g2.connect(bus);
+        o2.start(t + dt + 0.02); o2.stop(t + dt + dur + 0.06);
+        this._jinglePool.push(o2);
+      });
+
+      // ── Chord pad — C-major (C3-E3-G3) ────────────────────
+      [[130.8, -2], [164.8, 0], [196.0, +3]].forEach(([freq, detune]) => {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sine'; o.frequency.value = freq;
+        o.detune.value = detune;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(0.09, t + 0.3);
+        g.gain.setValueAtTime(0.09, t + 2.3);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 3.5);
+        o.connect(g); g.connect(bus);
+        o.start(t); o.stop(t + 3.6);
+        this._jinglePool.push(o);
+      });
+
+      // Fade out jingle bus
+      bus.gain.setValueAtTime(this._musicVol, t + 2.5);
+      bus.gain.linearRampToValueAtTime(0.0001, t + 3.5);
+    }, DELAY * 1000);
+
+    return TOTAL_MS;
   }
 
   // ── SEQUENCER LOOP ─────────────────────────────────────
@@ -352,10 +593,10 @@ class AudioManager {
     ];
     const ci = bar % 4;
 
-    // Chord pad at start of each bar
+    // Chord pad at start of each bar — routes through musicBus
     if (s16 === 0) {
       const dur = step * 16;
-      const mix = this._g(0.001); // starts silent
+      const mix = this._mg(0.001); // starts silent, on music bus
       CHORDS[ci].forEach(freq => {
         // 3 slightly detuned voices per note for richness
         [-4, 0, 4].forEach(dt => {
@@ -379,7 +620,7 @@ class AudioManager {
       const ai = (s16 / 2) % 8;
       const freq = ARPS[ci][ai];
       const dur  = step * 1.6;
-      const g = this._g(0.001);
+      const g = this._mg(0.001); // music bus
       const o = this.ctx.createOscillator();
       o.type = 'triangle'; o.frequency.value = freq;
       o.connect(g);
@@ -430,7 +671,7 @@ class AudioManager {
 
   _kick(t, stage) {
     const vol = Math.min(0.55, 0.28 + (stage-1)*0.022);
-    const g = this._g(vol);
+    const g = this._mg(vol); // music bus
     const o = this.ctx.createOscillator(), eg = this.ctx.createGain();
     o.type = 'sine';
     o.frequency.setValueAtTime(200, t);
@@ -446,7 +687,7 @@ class AudioManager {
 
   _snare(t, stage) {
     const vol = Math.min(0.4, 0.16 + (stage-1)*0.016);
-    const g = this._g(vol);
+    const g = this._mg(vol); // music bus
     // Noise body
     this._noise(t, 0.14, 1.0, 1200, g);
     // Tone component
@@ -455,20 +696,21 @@ class AudioManager {
 
   _hat(t, stage) {
     const vol = Math.min(0.22, 0.07 + (stage-1)*0.012);
-    const g = this._g(vol);
+    const g = this._mg(vol); // music bus
     this._noise(t, 0.04, 1.0, 9000, g);
   }
 
   _bass(freq, t, dur, stage) {
     const vol = Math.min(0.24, 0.09 + (stage-1)*0.012);
-    const g = this._g(vol);
+    const g = this._mg(vol); // music bus — gain already set to vol at creation
     const o = this.ctx.createOscillator();
     const flt = this.ctx.createBiquadFilter();
     o.type = 'square'; o.frequency.value = freq;
     flt.type = 'lowpass'; flt.frequency.value = 350 + stage * 20;
     flt.Q.value = 1.5;
     o.connect(flt); flt.connect(g);
-    g.gain.gain.setValueAtTime(vol, t);
+    // g.gain is an AudioParam — no double-indirection
+    g.gain.setValueAtTime(vol, t);
     g.gain.setValueAtTime(vol * 0.7, t + 0.06);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.start(t); o.stop(t + dur + 0.04);
@@ -477,7 +719,7 @@ class AudioManager {
 
   _melody(freq, t, dur, stage) {
     const vol = Math.min(0.2, 0.07 + (stage-1)*0.01);
-    const g = this._g(vol);
+    const g = this._mg(0.0001); // music bus — start silent, envelope ramps in
     const o = this.ctx.createOscillator();
     const flt = this.ctx.createBiquadFilter();
     o.type = 'sawtooth'; o.frequency.value = freq;
@@ -487,9 +729,10 @@ class AudioManager {
     flt.frequency.exponentialRampToValueAtTime(500, t + dur);
     flt.Q.value = 2;
     o.connect(flt); flt.connect(g);
-    g.gain.gain.setValueAtTime(0.0001, t);
-    g.gain.gain.linearRampToValueAtTime(vol, t + 0.02);
-    g.gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    // g.gain is an AudioParam — correct envelope (no double-indirection)
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.start(t); o.stop(t + dur + 0.04);
     this._track(o);
   }
@@ -794,7 +1037,9 @@ class ShadowRush {
       this._hideEventBanners();this.audio.play('die');vibrate([100]);return;
     }
     this.state='gameover';
-    this.audio.stopBGM();this.audio.play('die');vibrate([150,80,200]);
+    // Die SFX (impact crunch — SFX bus, plays immediately)
+    this.audio.play('die');
+    vibrate([150,80,200]);
 
     const sk=this.skins.getSkin();
     if(this.player){
@@ -803,6 +1048,7 @@ class ShadowRush {
 
     this.wallet.add(this.coins);
     this.stats.gamesPlayed++;this.stats.totalCoins+=this.coins;
+    const wasHighScore=this.score>0&&this.score>=(this.stats.highScore||0);
     if(this.score>this.stats.highScore)this.stats.highScore=this.score;
     if(this.stage>this.stats.bestStage)this.stats.bestStage=this.stage;
     if(this.elapsed>this.stats.longestRun)this.stats.longestRun=this.elapsed;
@@ -814,7 +1060,7 @@ class ShadowRush {
     document.getElementById('hud').classList.add('hidden');
     document.getElementById('rule-notification').classList.add('hidden');
     this._hideEventBanners();
-    const isNew=this.score>0&&this.score===this.stats.highScore;
+    const isNew=wasHighScore;
     document.getElementById('final-score').textContent=this.score;
     document.getElementById('final-best').textContent=this.stats.highScore;
     document.getElementById('final-stage').textContent=this.stage;
@@ -824,8 +1070,12 @@ class ShadowRush {
     document.getElementById('game-over').classList.remove('hidden');
     this._updateMenuUI();
 
-    // Start menu BGM after a short delay
-    setTimeout(()=>this.audio.startMenuBGM(), 1500);
+    // Play appropriate jingle then cross-fade into menu BGM
+    // New high score → triumphant victory jingle; otherwise → mournful game-over jingle
+    const jingleMs = isNew
+      ? this.audio.playVictoryJingle()
+      : this.audio.playGameOverJingle();
+    setTimeout(() => this.audio.startMenuBGM(), jingleMs + 600);
   }
 
   _checkAchievements(){
@@ -1045,13 +1295,32 @@ class ShadowRush {
     document.getElementById('wheel-btn').classList.toggle('highlight',this.wheel.canSpin());
   }
   _updateAudioUI(){
+    // Master volume
     const vol = Math.round(this.audio.getVol()*100);
     const sl = document.getElementById('volume-slider');
     if (sl) sl.value = vol;
     const vd = document.getElementById('volume-val');
     if (vd) vd.textContent = vol + '%';
+
+    // Music volume
+    const mVol = Math.round(this.audio.getMusicVol()*100);
+    const msl = document.getElementById('music-vol-slider');
+    if (msl) msl.value = mVol;
+    const mvd = document.getElementById('music-vol-val');
+    if (mvd) mvd.textContent = mVol + '%';
+
+    // SFX volume
+    const sVol = Math.round(this.audio.getSfxVol()*100);
+    const ssl = document.getElementById('sfx-vol-slider');
+    if (ssl) ssl.value = sVol;
+    const svd = document.getElementById('sfx-vol-val');
+    if (svd) svd.textContent = sVol + '%';
+
+    // HUD mute button
     const muteBtn = document.getElementById('hud-mute-btn');
     if (muteBtn) muteBtn.textContent = this.audio.getMuted() ? '🔇' : '🔊';
+
+    // Settings toggles
     const muteAll = document.getElementById('mute-all-btn');
     if (muteAll) { muteAll.textContent = this.audio.getMuted() ? 'ON' : 'OFF'; muteAll.className='toggle-btn'+(this.audio.getMuted()?' red':''); }
     const musicTgl = document.getElementById('music-toggle');
@@ -1194,11 +1463,28 @@ class ShadowRush {
     this._btn('gameover-home-btn',    ()=>{ this._closeAll(); document.getElementById('start-screen').classList.remove('hidden'); this.state='menu'; this._updateMenuUI(); this.audio.startMenuBGM(); });
 
     // ── Settings ──
+    // Master volume slider
     const volSlider = document.getElementById('volume-slider');
     volSlider?.addEventListener('input', ()=>{
       this.audio.unlock();
       const v = parseInt(volSlider.value)/100;
       this.audio.setVolume(v);
+      this._updateAudioUI();
+    });
+    // Music volume slider
+    const musicVolSlider = document.getElementById('music-vol-slider');
+    musicVolSlider?.addEventListener('input', ()=>{
+      this.audio.unlock();
+      const v = parseInt(musicVolSlider.value)/100;
+      this.audio.setMusicVol(v);
+      this._updateAudioUI();
+    });
+    // SFX volume slider
+    const sfxVolSlider = document.getElementById('sfx-vol-slider');
+    sfxVolSlider?.addEventListener('input', ()=>{
+      this.audio.unlock();
+      const v = parseInt(sfxVolSlider.value)/100;
+      this.audio.setSfxVol(v);
       this._updateAudioUI();
     });
     this._btn('music-toggle',  ()=>{ this.audio.setMusic(!this.audio.getMusic()); this._updateAudioUI(); });
