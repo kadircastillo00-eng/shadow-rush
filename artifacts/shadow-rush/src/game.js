@@ -1264,9 +1264,11 @@ class Particle {
     this.sq=sq;this.rot=Math.random()*Math.PI*2;this.rotV=(Math.random()-.5)*6;
   }
   update(dt){ this.x+=this.vx*dt;this.y+=this.vy*dt;this.vy+=140*dt;this.vx*=.985;this.life-=dt;this.rot+=this.rotV*dt; }
-  draw(ctx){
+  draw(ctx,glowScale=1){
     const a=Math.max(0,this.life/this.maxLife),sz=this.size*(0.3+0.7*a);
-    ctx.save();ctx.globalAlpha=a;ctx.fillStyle=this.color;ctx.shadowBlur=10;ctx.shadowColor=this.color;
+    ctx.save();ctx.globalAlpha=a;ctx.fillStyle=this.color;
+    // Skip shadowBlur for small/faint particles — expensive GPU op
+    if(sz>3&&a>0.35&&glowScale>0){ctx.shadowBlur=8*glowScale;ctx.shadowColor=this.color;}
     if(this.sq){ctx.translate(this.x,this.y);ctx.rotate(this.rot);ctx.fillRect(-sz/2,-sz/2,sz,sz);}
     else{ctx.beginPath();ctx.arc(this.x,this.y,sz,0,Math.PI*2);ctx.fill();}
     ctx.restore();
@@ -1433,6 +1435,13 @@ class ShadowRush {
   _initCanvas(){
     const resize=()=>{this.canvas.width=window.innerWidth;this.canvas.height=window.innerHeight;this.W=this.canvas.width;this.H=this.canvas.height;};
     window.addEventListener('resize',resize);resize();
+    // Detect mobile for performance scaling
+    this._isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1);
+    // Reduce glow intensity on mobile (shadowBlur is expensive on mobile GPU)
+    this._glowScale = this._isMobile ? 0.5 : 1.0;
+    // Particle cap: fewer on mobile to stay at 60 FPS
+    this._maxParticles = this._isMobile ? 60 : 150;
+    this._maxFloatTexts = 12;
   }
   _initStars(){
     this.bgStars=Array.from({length:100},()=>({x:Math.random()*3000,y:Math.random()*1500,r:Math.random()*1.4+.2,speed:Math.random()*.6+.1,alpha:Math.random()*.6+.1,tw:Math.random()*Math.PI*2}));
@@ -1698,6 +1707,8 @@ class ShadowRush {
 
   _loop(ts){
     requestAnimationFrame(t=>this._loop(t));
+    // Skip update+render entirely when tab/app is hidden — saves CPU & battery
+    if(document.hidden){ this.lastTime=ts; return; }
     const rawDt=Math.min((ts-this.lastTime)/1000,.05);this.lastTime=ts;
     let dt=rawDt;
     if(this.currentRule.id==='slow_motion')dt*=.38;
@@ -1754,7 +1765,10 @@ class ShadowRush {
 
     this._updatePlayer(dt);this._spawnObstacles(rawDt);this._updateObstacles(dt);
     this._spawnCoins(rawDt);this._updateCoins(dt);this._updateParticles(rawDt);
-    this._checkCollisions();this._updateHUD();this._checkAchievements();
+    this._checkCollisions();this._updateHUD();
+    // Achievement checks are expensive (string array search) — throttle to 2/s
+    this._achCheckT=(this._achCheckT||0)+rawDt;
+    if(this._achCheckT>=0.5){this._achCheckT=0;this._checkAchievements();}
     // World ambient particles
     this.worldRenderer.spawnAmbient(this, rawDt, this._worldIdx);
   }
@@ -1800,7 +1814,11 @@ class ShadowRush {
   }
   _updateParticles(dt){
     for(const p of this.particles)p.update(dt);for(const f of this.floatTexts)f.update(dt);
-    this.particles=this.particles.filter(p=>p.life>0);this.floatTexts=this.floatTexts.filter(f=>f.life>0);
+    this.particles=this.particles.filter(p=>p.life>0);
+    // Cap particle count to maintain 60 FPS
+    if(this.particles.length>this._maxParticles) this.particles.splice(0,this.particles.length-this._maxParticles);
+    this.floatTexts=this.floatTexts.filter(f=>f.life>0);
+    if(this.floatTexts.length>this._maxFloatTexts) this.floatTexts.splice(0,this.floatTexts.length-this._maxFloatTexts);
   }
   _checkCollisions(){
     if(!this.player)return;
@@ -1826,14 +1844,23 @@ class ShadowRush {
     if(p.y>this.H+100||p.y<-100){this._die();return;}
   }
   _updateHUD(){
-    document.getElementById('score').textContent=this.score;
-    document.getElementById('hud-coins').textContent=this.coins;
+    // Dirty-track each field — only write to DOM when the value actually changed
+    const s=this.score,co=this.coins,cb=this.combo,st=this.stage;
+    const timerSec=Math.max(0,Math.ceil(STAGE_DURATION-this.stageTimer));
+    const timerPct=Math.min(100,(this.stageTimer/STAGE_DURATION)*100)|0;
+    if(this._hudScore!==s){this._hudScore=s;document.getElementById('score').textContent=s;}
+    if(this._hudCoins!==co){this._hudCoins=co;document.getElementById('hud-coins').textContent=co;}
     const cd=document.getElementById('combo-display');
-    if(this.combo>=2){document.getElementById('combo-text').textContent='x'+this.combo;cd.style.display='flex';}
-    else cd.style.display='none';
-    document.getElementById('stage-label').textContent='STAGE '+this.stage;
-    document.getElementById('stage-timer-fill').style.width=Math.min(100,(this.stageTimer/STAGE_DURATION)*100)+'%';
-    document.getElementById('stage-timer-text').textContent=Math.max(0,Math.ceil(STAGE_DURATION-this.stageTimer))+'s';
+    if(cb>=2){
+      if(this._hudCombo!==cb){this._hudCombo=cb;document.getElementById('combo-text').textContent='x'+cb;}
+      if(cd.style.display!=='flex')cd.style.display='flex';
+    } else {
+      this._hudCombo=0;
+      if(cd.style.display!=='none')cd.style.display='none';
+    }
+    if(this._hudStage!==st){this._hudStage=st;document.getElementById('stage-label').textContent='STAGE '+st;}
+    if(this._hudTimerSec!==timerSec){this._hudTimerSec=timerSec;document.getElementById('stage-timer-text').textContent=timerSec+'s';}
+    if(this._hudTimerPct!==timerPct){this._hudTimerPct=timerPct;document.getElementById('stage-timer-fill').style.width=timerPct+'%';}
   }
   _updateMenuUI(){
     const bs=this.stats.bestStage||0;
@@ -1898,20 +1925,23 @@ class ShadowRush {
       this.worldRenderer.drawObstacle(ctx,o,this.elapsed,ghostA,this._worldIdx,this.colorHue);
     }
     ctx.shadowBlur=0;
+    const coinGS=this._glowScale;
     for(const c of this.coinItems){
       if(c.coll)continue;
       const pulse=Math.sin(c.gl)*.3+.7;
-      ctx.save();ctx.shadowBlur=16*pulse;ctx.shadowColor='#ffd60a';
+      ctx.save();
+      if(coinGS>0){ctx.shadowBlur=Math.round(12*pulse*coinGS);ctx.shadowColor='#ffd60a';}
       ctx.fillStyle=`rgba(255,214,10,${.85*pulse+.15})`;
       ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,Math.PI*2);ctx.fill();
       ctx.fillStyle=`rgba(255,255,200,${.5*pulse})`;
       ctx.beginPath();ctx.arc(c.x-c.r*.25,c.y-c.r*.25,c.r*.38,0,Math.PI*2);ctx.fill();
-      if(this.doubleCoins){ctx.fillStyle='#fff';ctx.font='bold 8px Orbitron,monospace';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText('x2',c.x,c.y-c.r-2);}
+      if(this.doubleCoins){ctx.shadowBlur=0;ctx.fillStyle='#fff';ctx.font='bold 8px Orbitron,monospace';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText('x2',c.x,c.y-c.r-2);}
       ctx.restore();
     }
     if(this.player&&this.state!=='gameover')this._renderPlayer(ctx);
     for(const f of this.floatTexts)f.draw(ctx);
-    for(const p of this.particles)p.draw(ctx);
+    const gs=this._glowScale;
+    for(const p of this.particles)p.draw(ctx,gs);
     if(isDark&&this.player){
       const g=ctx.createRadialGradient(this.player.x,this.player.y,55,this.player.x,this.player.y,340);
       g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,8,.98)');
@@ -1920,12 +1950,17 @@ class ShadowRush {
     ctx.restore();
   }
   _renderPlayer(ctx){
-    const p=this.player,sk=this.skins.getSkin();
-    for(let i=0;i<p.trail.length-1;i++){
+    const p=this.player,sk=this.skins.getSkin(),gs=this._glowScale;
+    // Trail — skip alternate trail segments on mobile for speed
+    const trailStep=this._isMobile?2:1;
+    for(let i=0;i<p.trail.length-1;i+=trailStep){
       const t=p.trail[i],frac=i/p.trail.length,sz=p.size*.55*frac;
+      if(sz<1)continue;
       let trailC=sk.glow;
       if(sk.id==='rainbow'||sk.id==='ultimate')trailC=`hsl(${(this.colorHue+i*12)%360},100%,65%)`;
-      ctx.save();ctx.globalAlpha=frac*.42;ctx.shadowBlur=10;ctx.shadowColor=trailC;ctx.fillStyle=trailC;
+      ctx.save();ctx.globalAlpha=frac*.42;
+      if(gs>0){ctx.shadowBlur=8*gs;ctx.shadowColor=trailC;}
+      ctx.fillStyle=trailC;
       ctx.beginPath();if(ctx.roundRect)ctx.roundRect(t.x-sz/2,t.y-sz/2,sz,sz,3);else ctx.fillRect(t.x-sz/2,t.y-sz/2,sz,sz);
       ctx.fill();ctx.restore();
     }
@@ -1934,13 +1969,14 @@ class ShadowRush {
     if(sk.id==='rainbow'||sk.id==='ultimate'||sk.id==='prism'){topC=`hsl(${this.colorHue%360},100%,65%)`;botC=`hsl(${(this.colorHue+80)%360},100%,55%)`;glowC=topC;}
     else if(sk.id==='cosmic'){topC=`hsl(${(this.colorHue*.7)%360},80%,65%)`;botC=`hsl(${((this.colorHue*.7)+120)%360},80%,50%)`;}
     ctx.save();
-    ctx.shadowBlur=26+Math.sin(this.elapsed*4)*5;ctx.shadowColor=glowC;
+    const glowPulse=gs>0?Math.round((22+Math.sin(this.elapsed*4)*4)*gs):0;
+    if(glowPulse>0){ctx.shadowBlur=glowPulse;ctx.shadowColor=glowC;}
     const grd=ctx.createLinearGradient(p.x-s/2,p.y-s/2,p.x+s/2,p.y+s/2);
     grd.addColorStop(0,topC);grd.addColorStop(1,botC);
     ctx.fillStyle=grd;
     ctx.beginPath();if(ctx.roundRect)ctx.roundRect(p.x-s/2,p.y-s/2,s,s,6);else ctx.fillRect(p.x-s/2,p.y-s/2,s,s);
     ctx.fill();
-    if(this.shield){ctx.strokeStyle='rgba(0,245,255,.7)';ctx.lineWidth=2.5;ctx.shadowBlur=14;ctx.shadowColor='#00f5ff';ctx.beginPath();ctx.arc(p.x,p.y,s*.85+Math.sin(this.elapsed*6)*3,0,Math.PI*2);ctx.stroke();}
+    if(this.shield){ctx.strokeStyle='rgba(0,245,255,.7)';ctx.lineWidth=2.5;if(gs>0){ctx.shadowBlur=12*gs;ctx.shadowColor='#00f5ff';}ctx.beginPath();ctx.arc(p.x,p.y,s*.85+Math.sin(this.elapsed*6)*3,0,Math.PI*2);ctx.stroke();}
     ctx.globalAlpha=.36;ctx.fillStyle='rgba(255,255,255,.25)';
     ctx.beginPath();if(ctx.roundRect)ctx.roundRect(p.x-s/2+4,p.y-s/2+4,s*.36,s*.2,3);else ctx.fillRect(p.x-s/2+4,p.y-s/2+4,s*.36,s*.2);
     ctx.fill();ctx.restore();
