@@ -1,6 +1,6 @@
 ---
 name: Shadow Rush audio architecture
-description: Web Audio API architecture for Shadow Rush — music bus, jingle system, known bugs fixed
+description: Web Audio API architecture for Shadow Rush — music bus, jingle system, world BGM dispatch, known bugs fixed
 ---
 
 ## Architecture
@@ -16,6 +16,20 @@ description: Web Audio API architecture for Shadow Rush — music bus, jingle sy
 - `startMenuBGM()` / `startGameBGM()` — fade out old, fade in new via `_fadeInMusic()`
 - `playGameOverJingle()` — descending Am lament (~5.2s), returns ms for menu BGM delay
 - `playVictoryJingle()` — rising C-major fanfare (~3.8s), plays on new high score
+- `setWorld(w)` — sets `_world` index (0–14) so `_seqLoop` dispatches correct BGM
+
+## World BGM dispatch
+
+`_gameStep(s16, bar, t, step)` now dispatches to `_bgm0–_bgm14()` based on `this._world`.
+Each BGM method uses world-appropriate instruments:
+- `_pad(freqs, t, dur, vol)` — polyphonic sustained chords (detune-spread sines)
+- `_bell(freq, t, dur, vol)` — triangle pluck with harmonic shimmer
+- `_drone(freq, t, dur, vol)` — sine with LFO vibrato (both main + LFO nodes tracked)
+- `_lead(freq, t, dur, vol, type)` — filtered oscillator melody
+- `_perc(t, f1, f2, dur, vol)` — pitch-sweep tom/ethnic drum
+- `_acid(freq, t, dur, vol, decay)` — square wave with resonant lowpass envelope
+
+BPM formula (world-aware): `bpmBase + min(50, (stage-1)*3)` using `WORLDS[world].bpmBase`.
 
 ## Bug fixed (was in original code)
 

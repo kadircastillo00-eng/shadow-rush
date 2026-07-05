@@ -1,0 +1,97 @@
+Completely redesign the world transition system.
+
+Do NOT reuse the same transition animation.
+
+Every world must have its own unique cinematic, entrance, voice, visual effects, sound effects, and music.
+
+The gameplay must pause completely during every cinematic. The player, obstacles, physics and score must freeze until the cinematic finishes.
+
+Each world should feel like entering a completely different universe.
+
+Examples:
+
+1. Neon Space
+- Stars appear one by one.
+- Neon lights activate.
+- Camera zooms in.
+- Voice: "Welcome... to Neon Space."
+
+2. Volcano Realm
+- The ground cracks.
+- Lava erupts.
+- Smoke fills the screen.
+- Camera shakes.
+- Voice: "Welcome... to the Volcano Realm."
+
+3. Serpent Temple
+- Darkness covers the screen.
+- Two giant glowing snake eyes appear.
+- The eyes slowly open.
+- A massive serpent roar is heard.
+- The temple fades into view.
+- Voice: "Welcome... to the Serpent Temple."
+
+4. Ice Kingdom
+- Everything freezes.
+- Ice spreads across the screen.
+- Snowstorm begins.
+- The ice breaks to reveal the world.
+
+5. Electric City
+- Screen glitches.
+- Lightning strikes everywhere.
+- Neon buildings power on.
+
+6. Ocean Depths
+- The camera dives underwater.
+- Bubbles rise.
+- Whales and fish pass in the background.
+
+7. Enchanted Forest
+- Leaves fall.
+- Fireflies appear.
+- Trees grow from the ground.
+
+8. Desert Kingdom
+- Sandstorm covers the screen.
+- Ancient ruins emerge from the sand.
+
+9. Haunted Mansion
+- Thunder.
+- Ghosts fly across the screen.
+- The mansion slowly appears.
+
+10. Future Laboratory
+- Holograms activate.
+- Digital scan effect.
+- Robots power on.
+
+11. Sky Kingdom
+- Clouds open.
+- Sunlight shines.
+- Floating islands appear.
+
+12. Crystal Cave
+- Crystals grow from the walls.
+- Everything begins to glow.
+
+13. Sakura Garden
+- Cherry blossom petals fill the screen.
+- Wind animation.
+- Peaceful music starts.
+
+14. Shadow Dimension
+- Reality breaks apart.
+- Dark portals appear.
+- Purple energy surrounds everything.
+
+15. Final Realm
+- The universe collapses.
+- Planets explode.
+- Black holes consume stars.
+- Space itself cracks.
+- A deep voice says:
+  "You have reached the end..."
+  "Prepare to face the Shadow King."
+
+Every cinematic must feel cinematic, surprising and memorable. No two world transitions should look alike.

@@ -1,6 +1,29 @@
 // ═══════════════════════════════════════════════════════════
 //  SHADOW RUSH — Full Engine with Real Synthesized Audio
 // ═══════════════════════════════════════════════════════════
+import { WORLDS, WorldRenderer, getWorldIdx } from './worlds.js';
+
+// ── CINEMATIC CONSTANTS ───────────────────────────────────
+// Duration (seconds) of each world's full-screen cinematic
+const CIN_DURATIONS = [4.5, 5.0, 5.5, 4.5, 4.0, 5.0, 4.5, 4.5, 5.5, 4.0, 4.5, 4.5, 4.5, 5.5, 8.0];
+// Voice-over text + Web Speech API params per world
+const CIN_VOICES = [
+  { text:'Entering Neon Space',              pitch:1.2, rate:0.9  },
+  { text:'Inferno Volcano awakens',          pitch:0.7, rate:0.8  },
+  { text:'The Serpent Temple stirs',         pitch:0.9, rate:0.85 },
+  { text:'Welcome to the Frozen Kingdom',    pitch:1.3, rate:0.8  },
+  { text:'Electric City online',             pitch:1.4, rate:1.1  },
+  { text:'Descending into the Deep Ocean',   pitch:0.8, rate:0.75 },
+  { text:'The Enchanted Forest welcomes you',pitch:1.2, rate:0.9  },
+  { text:'Lost in the Desert',               pitch:1.0, rate:0.85 },
+  { text:'Beware the Haunted Mansion',       pitch:0.6, rate:0.7  },
+  { text:'Future Lab initialized',           pitch:1.5, rate:1.2  },
+  { text:'Sky Kingdom, above the clouds',    pitch:1.3, rate:0.85 },
+  { text:'Crystal Cave resonates',           pitch:1.4, rate:0.8  },
+  { text:'Sakura Garden blooms',             pitch:1.1, rate:0.9  },
+  { text:'Shadow Dimension opens',           pitch:0.5, rate:0.65 },
+  { text:'Chaos Realm. Survive.',            pitch:0.6, rate:0.7  },
+];
 
 // ── CONSTANTS ────────────────────────────────────────────
 const SKINS = [
@@ -21,13 +44,7 @@ const SKINS = [
   { id:'shadow',    name:'SHADOW LORD', glow:'#ff2d78', price:0,   gradient:['#090018','#ff2d78'], secret:true, hint:'Reach Stage 20' },
   { id:'ultimate',  name:'ULTIMATE',    glow:'#ffffff', price:0,   gradient:['#00f5ff','#bf5af2','#ffd60a','#ff2d78'], secret:true, hint:'Reach Stage 50' },
 ];
-const OBS_THEMES = [
-  { id:'neon',   colors:['#ff2d78','#cc0055'], glow:'#ff2d78' },
-  { id:'fire',   colors:['#ff6b35','#cc2200'], glow:'#ff4500' },
-  { id:'ice',    colors:['#48cae4','#0077b6'], glow:'#00bfff' },
-  { id:'void',   colors:['#6200ea','#310052'], glow:'#6200ea' },
-  { id:'cosmic', colors:null,                  glow:'#ce93d8' },
-];
+
 const RULES = [
   { id:'normal',      name:'NORMAL',        desc:'' },
   { id:'gravity_flip',name:'⬆ GRAVITY FLIP',desc:'Gravity reversed!' },
@@ -90,13 +107,7 @@ const STAGE_DURATION = 20;
 function stageSpeed(s)         { return 190 + (s-1)*55; }
 function stageSpawnInterval(s) { return Math.max(0.45, 2.0-(s-1)*.12); }
 function stageCoinBonus(s)     { return s*3; }
-function stageObsTheme(s) {
-  if(s>=20) return OBS_THEMES[4];
-  if(s>=10) return OBS_THEMES[3];
-  if(s>=7)  return OBS_THEMES[2];
-  if(s>=4)  return OBS_THEMES[1];
-  return OBS_THEMES[0];
-}
+
 function loadJ(k,d){ try{return JSON.parse(localStorage.getItem(k)||'null')||d;}catch{return d;} }
 function saveJ(k,v){ localStorage.setItem(k,JSON.stringify(v)); }
 function vibrate(p){ try{navigator.vibrate?.(p);}catch{} }
@@ -107,6 +118,7 @@ function vibrate(p){ try{navigator.vibrate?.(p);}catch{} }
 // ═══════════════════════════════════════════════════════════
 class AudioManager {
   constructor() {
+    this._world = 0;   // current world index (0–14)
     // Persisted prefs
     this._vol      = parseFloat(localStorage.getItem('sr_vol')       || '0.7');
     this._musicVol = parseFloat(localStorage.getItem('sr_music_vol') || '0.8');
@@ -207,6 +219,26 @@ class AudioManager {
   // Separate SFX volume (0–1) — applied when SFX gain nodes are created
   setSfxVol(v) { this._sfxVol = v; localStorage.setItem('sr_sfx_vol', v); }
   getSfxVol()  { return this._sfxVol; }
+  setWorld(w)  { this._world = w; }
+
+  // Web Speech API voice-over — cancels any prior utterance
+  speak(text, cfg = {}) {
+    if (!('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.pitch  = cfg.pitch  ?? 1;
+      u.rate   = cfg.rate   ?? 1;
+      u.volume = this._muted ? 0 : Math.min(1, this._sfxVol * 0.9);
+      window.speechSynthesis.speak(u);
+      this._utterance = u;
+    } catch(e) {}
+  }
+
+  stopSpeak() {
+    try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch(e) {}
+    this._utterance = null;
+  }
 
   // ── GRAPH HELPERS ──────────────────────────────────────
   // SFX gain — connects to master (respects sfxVol multiplier)
@@ -556,7 +588,8 @@ class AudioManager {
   // ── SEQUENCER LOOP ─────────────────────────────────────
   _seqLoop() {
     if (this._mode === 'off' || !this._ok()) return;
-    const bpm  = this._mode === 'menu' ? 76 : Math.min(200, 96 + (this._stage-1)*8);
+    const bpmBase = this._mode === 'menu' ? 76 : (WORLDS[this._world]?.bpmBase ?? 96);
+    const bpm = this._mode === 'menu' ? 76 : Math.min(bpmBase + 50, bpmBase + (this._stage - 1) * 3);
     const step = 60 / bpm / 4;   // 16th note duration in seconds
     const AHEAD = 0.13;
 
@@ -736,6 +769,489 @@ class AudioManager {
     o.start(t); o.stop(t + dur + 0.04);
     this._track(o);
   }
+
+  // ── WORLD BGM INSTRUMENT HELPERS ───────────────────────
+  // Sustained chord pad (multiple detune-spread sines)
+  _pad(freqs, t, dur, vol) {
+    const g = this._mg(0.001);
+    freqs.forEach(freq => {
+      [-4, 0, 4].forEach(dt => {
+        const o = this.ctx.createOscillator();
+        o.type = 'sine'; o.frequency.value = freq; o.detune.value = dt;
+        o.connect(g); o.start(t); o.stop(t + dur + 0.2); this._track(o);
+      });
+    });
+    const attack = Math.min(0.9, dur * 0.3);
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.linearRampToValueAtTime(vol, t + attack);
+    g.gain.setValueAtTime(vol, t + dur - 0.3);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  }
+
+  // Bell / pluck (triangle + fast decay)
+  _bell(freq, t, dur, vol) {
+    const g = this._mg(vol);
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle'; o.frequency.value = freq;
+    o.connect(g); o.start(t); o.stop(t + dur + 0.1); this._track(o);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    // Shimmer harmonic
+    const o2 = this.ctx.createOscillator(), g2 = this.ctx.createGain();
+    o2.type = 'sine'; o2.frequency.value = freq * 2.76;
+    g2.gain.setValueAtTime(vol * 0.35, t);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.25);
+    o2.connect(g2); g2.connect(this._musicBus);
+    o2.start(t); o2.stop(t + dur * 0.3); this._track(o2);
+  }
+
+  // Low drone with vibrato
+  _drone(freq, t, dur, vol) {
+    const g = this._mg(0.001);
+    const o = this.ctx.createOscillator();
+    o.type = 'sine'; o.frequency.value = freq;
+    const lfo = this.ctx.createOscillator(), lg = this.ctx.createGain();
+    lfo.type = 'sine'; lfo.frequency.value = 4.5; lg.gain.value = freq * 0.004;
+    lfo.connect(lg); lg.connect(o.frequency);
+    o.connect(g); o.start(t); o.stop(t + dur + 0.1);
+    lfo.start(t); lfo.stop(t + dur + 0.1); this._track(o); this._track(lfo);
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.18);
+    g.gain.setValueAtTime(vol, t + dur - 0.18);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  }
+
+  // Lead synth melody note (filtered oscillator)
+  _lead(freq, t, dur, vol, type = 'sawtooth') {
+    const g = this._mg(0.001);
+    const o = this.ctx.createOscillator();
+    const flt = this.ctx.createBiquadFilter();
+    o.type = type; o.frequency.value = freq;
+    flt.type = 'bandpass'; flt.frequency.value = freq * 2.5; flt.Q.value = 2.5;
+    o.connect(flt); flt.connect(g);
+    o.start(t); o.stop(t + dur + 0.05); this._track(o);
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  }
+
+  // Percussive pitch sweep (ethnic drum / tom)
+  _perc(t, freq1, freq2, dur, vol) {
+    const g = this._mg(vol);
+    const o = this.ctx.createOscillator(), eg = this.ctx.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(freq1, t);
+    o.frequency.exponentialRampToValueAtTime(Math.max(1, freq2), t + dur * 0.5);
+    eg.gain.setValueAtTime(1, t);
+    eg.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(eg); eg.connect(g);
+    o.start(t); o.stop(t + dur + 0.05); this._track(o);
+  }
+
+  // Acid squelch bass (square + highpass filter envelope)
+  _acid(freq, t, dur, vol, decay = 0.5) {
+    const g = this._mg(0.001);
+    const o = this.ctx.createOscillator();
+    const flt = this.ctx.createBiquadFilter();
+    o.type = 'square'; o.frequency.value = freq;
+    flt.type = 'lowpass'; flt.frequency.setValueAtTime(200, t);
+    flt.frequency.exponentialRampToValueAtTime(4000, t + 0.04);
+    flt.frequency.exponentialRampToValueAtTime(200, t + decay);
+    flt.Q.value = 12;
+    o.connect(flt); flt.connect(g);
+    o.start(t); o.stop(t + dur + 0.05); this._track(o);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  }
+
+  // ── WORLD-DISPATCHING GAME STEP ────────────────────────
+  _gameStep(s16, bar, t, step) {
+    const w = this._world || 0, st = this._stage;
+    switch (w) {
+      case 0:  this._bgm0(s16,bar,t,step,st); break;
+      case 1:  this._bgm1(s16,bar,t,step,st); break;
+      case 2:  this._bgm2(s16,bar,t,step,st); break;
+      case 3:  this._bgm3(s16,bar,t,step,st); break;
+      case 4:  this._bgm4(s16,bar,t,step,st); break;
+      case 5:  this._bgm5(s16,bar,t,step,st); break;
+      case 6:  this._bgm6(s16,bar,t,step,st); break;
+      case 7:  this._bgm7(s16,bar,t,step,st); break;
+      case 8:  this._bgm8(s16,bar,t,step,st); break;
+      case 9:  this._bgm9(s16,bar,t,step,st); break;
+      case 10: this._bgm10(s16,bar,t,step,st); break;
+      case 11: this._bgm11(s16,bar,t,step,st); break;
+      case 12: this._bgm12(s16,bar,t,step,st); break;
+      case 13: this._bgm13(s16,bar,t,step,st); break;
+      case 14: this._bgm14(s16,bar,t,step,st); break;
+      default: this._bgm0(s16,bar,t,step,st);
+    }
+  }
+
+  // ── WORLD BGM PATTERNS ─────────────────────────────────
+
+  // 0 — Neon Space: synthwave Dm, 4-on-floor kick, arp melody
+  _bgm0(s16, bar, t, step, st) {
+    // Kick: 4-on-floor
+    if ([0,4,8,12].includes(s16)) this._kick(t, st);
+    // Snare: 2+4
+    if (s16===4||s16===12) this._snare(t, st);
+    // Hi-hat: 8th notes
+    if (s16%2===0) this._hat(t, st);
+    // Bass: D2-A2-C2-A2 repeating every beat
+    if (s16%4===0) {
+      const basses=[73.4,110,65.4,110]; this._bass(basses[(s16/4)%4],t,step*3.5,st);
+    }
+    // Synth arp: D3-F3-A3-C4 every 2 steps
+    if (s16%2===0&&s16<12) {
+      const arp=[146.8,174.6,220,261.6,220,174.6]; this._melody(arp[(s16/2)%6],t,step*1.5,st);
+    }
+    // Chord pad every bar
+    if (s16===0) {
+      const chords=[[146.8,174.6,220],[174.6,220,261.6],[130.8,164.8,196],[98,146.8,174.6]];
+      this._pad(chords[bar%4],t,step*16*0.85,0.022);
+    }
+  }
+
+  // 1 — Inferno Volcano: tribal heavy, D Phrygian, no melody
+  _bgm1(s16, bar, t, step, st) {
+    // Heavy tribal kick pattern
+    if ([0,3,6,9,11].includes(s16)) this._kick(t, Math.min(15, st+4));
+    // Tom-like percs
+    if ([2,7,13].includes(s16)) this._perc(t, 140, 60, 0.18, 0.28);
+    // Sub bass drone D2 on downbeat
+    if (s16===0) this._drone(73.4, t, step*16*0.9, 0.18);
+    // Occasional Eb2 bass accent for Phrygian flavor
+    if (s16===4||s16===12) this._perc(t, 300, 90, 0.12, 0.22);
+    // Low impact pad (fire chord: D2-F2-Ab2)
+    if (s16===0&&bar%2===0) this._pad([73.4,87.3,103.8],t,step*16*0.75,0.016);
+  }
+
+  // 2 — Serpent Temple: mysterious tribal, D Phrygian
+  _bgm2(s16, bar, t, step, st) {
+    if (s16===0||s16===8) this._kick(t, st);
+    if (s16===5||s16===13) this._perc(t, 220, 100, 0.14, 0.2);
+    if (s16===3||s16===7||s16===11) this._hat(t, st);
+    if (s16%4===0) {
+      const bass=[146.8,155.6,146.8,130.8]; this._bass(bass[(s16/4)%4],t,step*3.8,st);
+    }
+    // Flute-like sine melody (Phrygian: D-Eb-F-G-A-Bb-C)
+    const mel=[146.8,0,155.6,0,174.6,0,196,0,220,0,233.1,0,261.6,0,220,0];
+    if (mel[s16]) this._lead(mel[s16],t,step*1.6,0.07,'sine');
+    if (s16===0) this._pad([73.4,146.8,196],t,step*16*0.8,0.014);
+  }
+
+  // 3 — Frozen Kingdom: ambient, no drums, C major
+  _bgm3(s16, bar, t, step, st) {
+    // No kick, no snare, no hat — pure ambient
+    // Bell melody on slow positions
+    const bellNotes=[261.6,0,0,329.6,0,0,392,0,0,329.6,0,0,440,0,0,0];
+    if (bellNotes[s16]) this._bell(bellNotes[s16],t,step*2.5,0.06);
+    // Chord pad: C-Am-F-G
+    if (s16===0) {
+      const pads=[[130.8,164.8,196],[110,130.8,164.8],[87.3,130.8,174.6],[98,146.8,196]];
+      this._pad(pads[bar%4],t,step*16*0.92,0.024);
+    }
+    // Occasional high bell shimmer
+    if (s16===8&&bar%2===0) this._bell(523.3,t,step*3,0.04);
+  }
+
+  // 4 — Electric City: cyberpunk Cm, ultra-fast
+  _bgm4(s16, bar, t, step, st) {
+    // Kick: every 8th note (dense)
+    if (s16%2===0) this._kick(t, st+2);
+    // Snare: 4+12
+    if (s16===4||s16===12) this._snare(t, st);
+    // Open hat: every 16th
+    this._hat(t, st);
+    // Acid bass: C-G-Bb-Eb cycling
+    if (s16%4===0) {
+      const basses=[65.4,98,116.5,77.8]; this._acid(basses[(s16/4)%4],t,step*2.5,0.2,0.35);
+    }
+    // Lead melody: short sharp notes
+    const lead=[0,261.6,0,0,311.1,0,0,0,261.6,0,0,349.2,0,0,311.1,0];
+    if (lead[s16]) this._lead(lead[s16],t,step*0.9,0.08,'square');
+    // Pad: Cm power chord
+    if (s16===0) this._pad([65.4,77.8,98],t,step*16*0.6,0.012);
+  }
+
+  // 5 — Deep Ocean: ambient underwater, Ab major
+  _bgm5(s16, bar, t, step, st) {
+    // No kick or snare — ultra sparse
+    // Soft whale-like drone
+    if (s16===0) this._drone(103.8,t,step*16*0.9,0.12);
+    // Bell arp: slow, Ab-C-Eb-Ab (every 4 steps)
+    const bells=[207.7,0,0,0,261.6,0,0,0,311.1,0,0,0,415.3,0,0,0];
+    if (bells[s16]) this._bell(bells[s16],t,step*3.5,0.055);
+    // Pad: Ab2-C3-Eb3 sustained
+    if (s16===0) this._pad([103.8,130.8,155.6],t,step*16*0.88,0.02);
+    // Occasional high shimmer
+    if (s16===8&&bar%3===0) this._bell(523.3,t,step*2,0.03);
+    // Bubble percussion (short noise-like perc at low freq)
+    if (Math.random()<0.15&&s16%3===0) this._perc(t,80,55,0.08,0.06);
+  }
+
+  // 6 — Enchanted Forest: magical G Lydian
+  _bgm6(s16, bar, t, step, st) {
+    // Light kick: 0, 8
+    if (s16===0||s16===8) this._kick(t, Math.max(1, st-1));
+    // Gentle hat: 8th notes
+    if (s16%2===0) this._hat(t, Math.max(1, st-2));
+    // Bell arpeggio (G Lydian: G-A-B-C#-D-E-F#)
+    const arp=[196,0,220,0,246.9,0,277.2,0,293.7,0,329.6,0,370,0,293.7,0];
+    if (arp[s16]) this._bell(arp[s16],t,step*1.8,0.06);
+    // Warm pad: G-B-D
+    if (s16===0) {
+      const pads=[[98,123.5,146.8],[110,138.6,174.6],[87.3,110,130.8],[98,146.8,196]];
+      this._pad(pads[bar%4],t,step*16*0.85,0.022);
+    }
+  }
+
+  // 7 — Lost Desert: exotic D Phrygian Dominant, syncopated
+  _bgm7(s16, bar, t, step, st) {
+    // Syncopated kick: 0, 5, 8, 13
+    if ([0,5,8,13].includes(s16)) this._kick(t, st);
+    // Hand drum: _perc at 3, 10
+    if (s16===3||s16===10) this._perc(t, 280, 110, 0.16, 0.18);
+    // Bass: D2 anchored with Eb2 tension
+    if (s16===0||s16===8) this._bass(73.4,t,step*4,st);
+    if (s16===5) this._bass(77.8,t,step*2,st);
+    // Exotic lead (Phrygian Dominant: D-Eb-F#-G-A-Bb-C)
+    const mel=[146.8,0,155.6,0,0,185,0,196,0,220,0,0,233.1,0,261.6,0];
+    if (mel[s16]) this._lead(mel[s16],t,step*1.7,0.07,'sawtooth');
+    // Drone pad every 2 bars
+    if (s16===0&&bar%2===0) this._pad([73.4,185,220],t,step*16*0.8,0.016);
+  }
+
+  // 8 — Haunted Mansion: horror diminished, very sparse
+  _bgm8(s16, bar, t, step, st) {
+    // Clock tick at 0 and 8
+    if (s16===0||s16===8) this._perc(t,800,400,0.06,0.08);
+    // Dissonant dim pad: B2-D3-F3-Ab3
+    if (s16===0) {
+      const dim=[[123.5,146.8,174.6,207.7],[116.5,138.6,164.8,196],[130.8,155.6,185,220],[110,130.8,155.6,185]];
+      this._pad(dim[bar%4],t,step*16*0.88,0.018);
+    }
+    // Very sparse creepy melody (only 4 notes across whole bar)
+    const mel=[0,0,0,0,123.5,0,0,0,0,0,0,0,116.5,0,0,0];
+    if (mel[s16]&&bar%3===0) this._lead(mel[s16],t,step*2,0.05,'sine');
+    // Occasional low hit
+    if (s16===12&&bar%4===0) this._bass(61.7,t,step*3.5,st);
+  }
+
+  // 9 — Future Lab: acid techno Cm, 145 BPM
+  _bgm9(s16, bar, t, step, st) {
+    // Standard 4-on-floor kick
+    if ([0,4,8,12].includes(s16)) this._kick(t, st);
+    // Snare 4+12 + accidental 6
+    if (s16===4||s16===12) this._snare(t, st);
+    if (s16===6&&bar%2===0) this._snare(t, Math.max(1, st-2));
+    // 16th hat
+    this._hat(t, st);
+    // Acid bass riff (16th pattern in Cm)
+    const acidB=[65.4,0,98,0,77.8,0,98,0,65.4,0,0,116.5,0,98,0,0];
+    if (acidB[s16]) this._acid(acidB[s16],t,step*1.8,0.18,0.3);
+    // Robotic lead
+    const rob=[0,0,261.6,0,0,0,311.1,0,0,261.6,0,0,349.2,0,0,0];
+    if (rob[s16]) this._lead(rob[s16],t,step*1.2,0.07,'square');
+    if (s16===0) this._pad([65.4,77.8,98,116.5],t,step*16*0.55,0.01);
+  }
+
+  // 10 — Sky Kingdom: harp + strings, C major, heavenly
+  _bgm10(s16, bar, t, step, st) {
+    // No kick — soft rim at 4+12
+    if (s16===4||s16===12) this._perc(t,700,500,0.06,0.07);
+    // Harp arpeggio: ascending C-E-G-C5-E5
+    const harp=[261.6,329.6,392,0,523.3,0,659.3,0,392,0,523.3,0,261.6,329.6,392,0];
+    if (harp[s16]) this._bell(harp[s16],t,step*2,0.06);
+    // String pad: C3-G3-C4-E4
+    if (s16===0) {
+      const pads=[[130.8,196,261.6,329.6],[110,164.8,220,329.6],[87.3,130.8,174.6,261.6],[98,146.8,196,293.7]];
+      this._pad(pads[bar%4],t,step*16*0.9,0.02);
+    }
+    // Occasional high shimmer
+    if (s16===8) this._bell(659.3+Math.random()*50,t,step*1.5,0.04);
+  }
+
+  // 11 — Crystal Cave: ethereal whole-tone scale
+  _bgm11(s16, bar, t, step, st) {
+    // No drums at all — purely ambient
+    // Whole-tone pad clusters (C-D-E-F#-G#-A#)
+    if (s16===0) {
+      const wt=[[261.6,293.7,329.6],[293.7,329.6,370],[329.6,370,415.3],[261.6,329.6,415.3]];
+      this._pad(wt[bar%4],t,step*16*0.9,0.02);
+    }
+    // Bell arpeggio: whole-tone up and down
+    const bellW=[261.6,0,293.7,0,329.6,0,370,0,415.3,0,370,0,329.6,0,293.7,0];
+    if (bellW[s16]) this._bell(bellW[s16],t,step*1.9,0.055);
+    // Bass drone: C2 with whole-tone shimmer
+    if (s16===0) this._drone(65.4,t,step*16*0.85,0.08);
+  }
+
+  // 12 — Sakura Garden: A pentatonic minor, peaceful
+  _bgm12(s16, bar, t, step, st) {
+    // Very soft kick only on bar downbeat
+    if (s16===0) this._kick(t, Math.max(1, st-3));
+    // Koto-like bell melody (A pent minor: A-C-D-E-G)
+    const koto=[0,220,0,261.6,0,0,293.7,0,0,329.6,0,0,196,0,0,0];
+    if (koto[s16]) this._bell(koto[s16],t,step*2.2,0.065);
+    // Soft pad: Am (A-C-E)
+    if (s16===0) {
+      const pads=[[110,130.8,164.8],[87.3,110,130.8],[110,146.8,196],[98,130.8,196]];
+      this._pad(pads[bar%4],t,step*16*0.88,0.018);
+    }
+    // Soft bass
+    if (s16===0||s16===8) this._bass(110,t,step*7,st);
+  }
+
+  // 13 — Shadow Dimension: D Locrian, dark cinematic
+  _bgm13(s16, bar, t, step, st) {
+    // Heavy kick pattern
+    if ([0,2,8,10].includes(s16)) this._kick(t, st+3);
+    // Heavy snare
+    if (s16===4||s16===12) this._snare(t, st+2);
+    // Dark drone bass: D2 + occasional tritone Ab2
+    if (s16===0) this._drone(73.4,t,step*16*0.85,0.16);
+    if (s16===8&&bar%2===0) this._drone(103.8,t,step*8*0.8,0.12);
+    // Dissonant bass hits
+    if (s16%4===0) {
+      const db=[73.4,77.8,73.4,65.4]; this._bass(db[(s16/4)%4],t,step*3.5,st);
+    }
+    // Dark lead: D Locrian melody (D-Eb-F-G-Ab-Bb-C)
+    const shadow=[0,146.8,0,0,155.6,0,0,174.6,0,0,196,0,207.7,0,0,233.1];
+    if (shadow[s16]) this._lead(shadow[s16],t,step*1.8,0.06,'sawtooth');
+    // Dark pad: dissonant cluster
+    if (s16===0) this._pad([73.4,103.8,155.6],t,step*16*0.7,0.014);
+  }
+
+  // 14 — Chaos Realm: maximum intensity, all notes
+  _bgm14(s16, bar, t, step, st) {
+    // Kick EVERY 16th
+    this._kick(t, Math.min(20, st+5));
+    // Snare on odd 16ths
+    if (s16%2===1) this._snare(t, st+3);
+    // Hat every 16th
+    this._hat(t, st);
+    // Bass cycles through all worlds' roots rapidly
+    const allBass=[73.4,65.4,146.8,130.8,103.8,110,196,155.6,123.5,65.4,207.7,261.6,110,73.4,261.6,65.4];
+    this._acid(allBass[s16],t,step*1.5,0.2,0.25);
+    // Chaotic melody: random note from mixed scales every step
+    const chaos=[261.6,293.7,220,311.1,349.2,329.6,261.6,415.3,392,440,370,261.6,493.9,329.6,415.3,523.3];
+    if (bar%2===0) this._lead(chaos[s16],t,step*0.85,0.07,'sawtooth');
+    else this._bell(chaos[(s16+8)%16]*0.5,t,step*0.9,0.05);
+    // Giant pad every bar (cycling world chord colors)
+    if (s16===0) {
+      const allChords=[[73.4,146.8,220],[65.4,130.8,196],[103.8,207.7,311.1],[98,196,293.7]];
+      this._pad(allChords[bar%4],t,step*16*0.5,0.014);
+    }
+  }
+
+  // ── WORLD TRANSITION SFX ───────────────────────────────
+  // Each method connects directly to _master (not tracked — immune to BGM crossfade)
+  playTransitionSFX(worldIdx) {
+    if (!this._ok() || !this._sfx) return;
+    const t = this._now() + 0.05;
+    try {
+      switch(worldIdx) {
+        case 0:  this._sfx0(t);  break; case 1:  this._sfx1(t);  break;
+        case 2:  this._sfx2(t);  break; case 3:  this._sfx3(t);  break;
+        case 4:  this._sfx4(t);  break; case 5:  this._sfx5(t);  break;
+        case 6:  this._sfx6(t);  break; case 7:  this._sfx7(t);  break;
+        case 8:  this._sfx8(t);  break; case 9:  this._sfx9(t);  break;
+        case 10: this._sfx10(t); break; case 11: this._sfx11(t); break;
+        case 12: this._sfx12(t); break; case 13: this._sfx13(t); break;
+        case 14: this._sfx14(t); break;
+      }
+    } catch(e) {}
+  }
+
+  _sfx0(t){ // Neon Space: laser sweep + neon chord
+    const o=this.ctx.createOscillator(),g=this.ctx.createGain();
+    o.type='sawtooth'; o.frequency.setValueAtTime(100,t); o.frequency.exponentialRampToValueAtTime(1800,t+1.2);
+    g.gain.setValueAtTime(0.28*this._sfxVol,t); g.gain.exponentialRampToValueAtTime(0.001,t+1.6);
+    o.connect(g); g.connect(this._master); o.start(t); o.stop(t+1.7);
+    [440,554,659,880].forEach((f,i)=>this._osc(f,'sine',t+i*0.18,0.65,0.11*this._sfxVol));
+  }
+  _sfx1(t){ // Inferno Volcano: deep rumble + explosion
+    this._noise(t,0.4,0.45*this._sfxVol,50);
+    this._osc(60,'sine',t,1.2,0.38*this._sfxVol);
+    this._osc(55,'sawtooth',t+0.1,0.8,0.28*this._sfxVol);
+    this._noise(t+0.35,0.25,0.55*this._sfxVol,90);
+  }
+  _sfx2(t){ // Serpent Temple: mystical wind chime + drone
+    this._osc(220,'sine',t,1.5,0.11*this._sfxVol);
+    this._osc(147,'triangle',t,2.0,0.17*this._sfxVol);
+    [660,880,1100,1320].forEach((f,i)=>this._osc(f,'sine',t+i*0.13,0.28,0.08*this._sfxVol));
+    this._osc(330,'sine',t+0.4,0.9,0.09*this._sfxVol);
+  }
+  _sfx3(t){ // Frozen Kingdom: ice crystal bells + cold wind
+    [1047,1319,1568,2093].forEach((f,i)=>this._osc(f,'sine',t+i*0.16,0.55,0.1*this._sfxVol));
+    this._noise(t,0.9,0.14*this._sfxVol,4000);
+    [523,659,784].forEach((f,i)=>this._osc(f,'triangle',t+0.7+i*0.22,0.6,0.08*this._sfxVol));
+  }
+  _sfx4(t){ // Electric City: glitchy digital burst
+    this._noise(t,0.09,0.38*this._sfxVol,5000);
+    [880,660,1100,440,1320,880].forEach((f,i)=>this._osc(f,'square',t+i*0.055,0.11,0.13*this._sfxVol));
+    this._noise(t+0.45,0.07,0.25*this._sfxVol,7000);
+  }
+  _sfx5(t){ // Deep Ocean: whale drone + bubbles
+    this._osc(80,'sine',t,2.5,0.19*this._sfxVol);
+    this._osc(55,'sine',t+0.2,2.0,0.14*this._sfxVol);
+    for(let i=0;i<5;i++) this._noise(t+i*0.32,0.08,0.07*this._sfxVol,2200);
+  }
+  _sfx6(t){ // Enchanted Forest: magical cascade
+    [523,659,784,1047,1319,1047,784,659].forEach((f,i)=>this._osc(f,'triangle',t+i*0.13,0.45,0.09*this._sfxVol));
+    this._noise(t,1.5,0.05*this._sfxVol,3200);
+  }
+  _sfx7(t){ // Lost Desert: sandy wind + exotic string hit
+    this._noise(t,0.65,0.18*this._sfxVol,900);
+    this._osc(185,'sawtooth',t,0.8,0.15*this._sfxVol);
+    this._osc(147,'sine',t+0.22,1.0,0.13*this._sfxVol);
+    [370,330,294,247].forEach((f,i)=>this._osc(f,'sine',t+0.55+i*0.16,0.32,0.07*this._sfxVol));
+  }
+  _sfx8(t){ // Haunted Mansion: ghostly wail + creak
+    this._osc(55,'sine',t,2.2,0.24*this._sfxVol);
+    const o=this.ctx.createOscillator(),g=this.ctx.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(380,t+0.3); o.frequency.exponentialRampToValueAtTime(190,t+1.8);
+    g.gain.setValueAtTime(0.14*this._sfxVol,t+0.3); g.gain.exponentialRampToValueAtTime(0.001,t+2.2);
+    o.connect(g); g.connect(this._master); o.start(t+0.3); o.stop(t+2.3);
+    this._noise(t+0.1,0.3,0.11*this._sfxVol,180);
+  }
+  _sfx9(t){ // Future Lab: robotic scanner beep
+    [880,440,880,1760].forEach((f,i)=>this._osc(f,'square',t+i*0.09,0.11,0.13*this._sfxVol));
+    this._noise(t,0.06,0.28*this._sfxVol,8000);
+    this._osc(110,'sine',t,1.0,0.19*this._sfxVol);
+    [1760,880,1760,3520].forEach((f,i)=>this._osc(f,'square',t+0.55+i*0.07,0.09,0.1*this._sfxVol));
+  }
+  _sfx10(t){ // Sky Kingdom: heavenly harp glissando
+    [523,659,784,1047,1319,1568,2093].forEach((f,i)=>this._osc(f,'sine',t+i*0.11,0.55,0.09*this._sfxVol));
+    this._noise(t,1.6,0.07*this._sfxVol,6000);
+    [784,1047,1319,1568].forEach((f,i)=>this._osc(f,'triangle',t+0.85+i*0.13,0.4,0.07*this._sfxVol));
+  }
+  _sfx11(t){ // Crystal Cave: resonant ring cascade
+    [261.6,329.6,440,554.4,659.3].forEach((f,i)=>{
+      this._osc(f*2,'triangle',t+i*0.09,1.3,0.1*this._sfxVol);
+      this._osc(f*4,'sine',t+i*0.09+0.05,0.5,0.05*this._sfxVol);
+    });
+  }
+  _sfx12(t){ // Sakura Garden: gentle koto pluck cascade
+    [440,554,659,880,1047,880,659,554].forEach((f,i)=>this._osc(f,'triangle',t+i*0.16,0.5,0.09*this._sfxVol));
+    this._noise(t,1.0,0.04*this._sfxVol,5500);
+  }
+  _sfx13(t){ // Shadow Dimension: dark sub hit + pitch fall
+    this._osc(40,'sine',t,2.5,0.38*this._sfxVol);
+    this._noise(t,0.5,0.28*this._sfxVol,60);
+    const o=this.ctx.createOscillator(),g=this.ctx.createGain();
+    o.type='sawtooth'; o.frequency.setValueAtTime(750,t+0.2); o.frequency.exponentialRampToValueAtTime(45,t+1.8);
+    g.gain.setValueAtTime(0.19*this._sfxVol,t+0.2); g.gain.exponentialRampToValueAtTime(0.001,t+2.2);
+    o.connect(g); g.connect(this._master); o.start(t+0.2); o.stop(t+2.3);
+  }
+  _sfx14(t){ // Chaos Realm: everything at once
+    this._noise(t,0.32,0.38*this._sfxVol,40);
+    [40,55,80].forEach(f=>this._osc(f,'sine',t,2.0,0.19*this._sfxVol));
+    for(let i=0;i<8;i++) this._osc(200+i*300,'sawtooth',t+i*0.065,0.3,0.1*this._sfxVol);
+    this._noise(t+0.42,0.2,0.28*this._sfxVol,2200);
+    [2093,1047,523,261.6].forEach((f,i)=>this._osc(f,'square',t+0.85+i*0.1,0.32,0.11*this._sfxVol));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -903,6 +1419,9 @@ class ShadowRush {
     this.doubleCoins=false;this.shield=false;this.scoreBoost=false;
     this.coinRainT=0; this.doubleRun=false;
     this.bgStars=[]; this.lastTime=0;
+    this.worldRenderer = new WorldRenderer();
+    this._worldIdx = 0;
+    this._worldTransition = null;
 
     this._initCanvas(); this._initStars();
     this._bindEvents(); this._setupUI();
@@ -987,8 +1506,13 @@ class ShadowRush {
     this.doubleRun=this.wheel.xp2;if(this.doubleRun)this.wheel.setXP2(false);
     this.player=this._createPlayer();
     document.getElementById('hud').classList.remove('hidden');
+    this._worldIdx=0;
     this.audio.setStage(1);
+    this.audio.setWorld(0);
+    this._worldTransition={ worldIdx:0, name:WORLDS[0].name, t:0, duration:CIN_DURATIONS[0] };
     this.audio.startGameBGM();
+    this.audio.playTransitionSFX(0);
+    this.audio.speak(CIN_VOICES[0].text, CIN_VOICES[0]);
     this._updateHUD();this._updateRuleBanner();
   }
 
@@ -1023,7 +1547,19 @@ class ShadowRush {
     this.currentRule=RULES[0];this.ruleTimer=0;
     this.activeEvent=null;this.eventTimer=0;this.eventCooldown=25;
     this.doubleCoins=false;this.shield=false;this.scoreBoost=false;
+    // World progression check (new world every 3 stages)
+    const newWorldIdx=getWorldIdx(this.stage);
+    const worldChanged=newWorldIdx!==this._worldIdx;
+    this._worldIdx=newWorldIdx;
     this.audio.setStage(this.stage);
+    this.audio.setWorld(newWorldIdx);
+    if(worldChanged){
+      // Show world cinematic and cross-fade into new world BGM
+      this._worldTransition={ worldIdx:newWorldIdx, name:WORLDS[newWorldIdx].name, t:0, duration:CIN_DURATIONS[newWorldIdx] };
+      this.audio.startGameBGM();
+      this.audio.playTransitionSFX(newWorldIdx);
+      this.audio.speak(CIN_VOICES[newWorldIdx].text, CIN_VOICES[newWorldIdx]);
+    }
     this._hideEventBanners();this.state='playing';this._updateHUD();
     const lbl=document.getElementById('stage-label');
     lbl.style.color='#ffd60a';lbl.style.textShadow='0 0 14px #ffd60a';
@@ -1172,7 +1708,17 @@ class ShadowRush {
   }
 
   _update(dt,rawDt){
-    this.elapsed+=rawDt;this.stageTimer+=rawDt;
+    this.elapsed+=rawDt;
+    // Freeze all gameplay during the world cinematic — only advance the timer
+    if(this._worldTransition){
+      this._worldTransition.t+=rawDt;
+      if(this._worldTransition.t>=this._worldTransition.duration){
+        this._worldTransition=null;
+        this.audio.stopSpeak();
+      }
+      return;
+    }
+    this.stageTimer+=rawDt;
 
     // SCORE (float accumulator — fixes the always-0 bug)
     const stageScore=this.stage*12,comboMult=1+this.combo*.08;
@@ -1209,6 +1755,8 @@ class ShadowRush {
     this._updatePlayer(dt);this._spawnObstacles(rawDt);this._updateObstacles(dt);
     this._spawnCoins(rawDt);this._updateCoins(dt);this._updateParticles(rawDt);
     this._checkCollisions();this._updateHUD();this._checkAchievements();
+    // World ambient particles
+    this.worldRenderer.spawnAmbient(this, rawDt, this._worldIdx);
   }
 
   _updatePlayer(dt){
@@ -1223,11 +1771,11 @@ class ShadowRush {
   _spawnObstacles(rawDt){
     const interval=stageSpawnInterval(this.stage);
     this.obstSpawnT+=rawDt;if(this.obstSpawnT<interval)return;this.obstSpawnT=0;
-    const W=this.W,H=this.H,theme=stageObsTheme(this.stage);
+    const W=this.W,H=this.H;
     const w=18+Math.random()*14;const gap=H*.28+Math.random()*H*.08;const topH=30+Math.random()*(H-gap-60);
     const spd=stageSpeed(this.stage)*(this.currentRule.id==='speed_boost'?1.4:1)*(this.currentRule.id==='slow_motion'?.42:1);
-    this.obstacles.push({x:W+w,y:0,w,h:topH,spd,theme,fl:0});
-    this.obstacles.push({x:W+w,y:topH+gap,w,h:H-topH-gap,spd,theme,fl:0});
+    this.obstacles.push({x:W+w,y:0,w,h:topH,spd,fl:0});
+    this.obstacles.push({x:W+w,y:topH+gap,w,h:H-topH-gap,spd,fl:0});
   }
   _updateObstacles(dt){
     for(const o of this.obstacles){o.x-=o.spd*dt;if(this.currentRule.id==='ghost')o.fl=(o.fl+dt*6)%(Math.PI*2);}
@@ -1331,34 +1879,23 @@ class ShadowRush {
 
   // ── RENDER ───────────────────────────────────────────────
   _render(rawDt){
+    // Full-screen cinematic takeover — no game elements shown during world transition
+    if(this._worldTransition){
+      this.worldRenderer.drawTransition(this.ctx,this.W,this.H,this._worldTransition);
+      return;
+    }
     const ctx=this.ctx,W=this.W,H=this.H,isDark=this.currentRule.id==='dark';
     ctx.save();ctx.translate(this.shakeX,this.shakeY);
-    ctx.fillStyle=isDark?'#000008':'#050510';ctx.fillRect(0,0,W,H);
-    if(!isDark){
-      ctx.strokeStyle='rgba(0,245,255,.035)';ctx.lineWidth=1;
-      const gs=60,off=(this.elapsed*30)%gs;
-      for(let x=-off;x<W+gs;x+=gs){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
-      for(let y=0;y<H;y+=gs){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+    // World background (WorldRenderer handles sky, grid, stars, and BG elements)
+    if(isDark){
+      ctx.fillStyle='#000008';ctx.fillRect(0,0,W,H);
+    } else {
+      this.worldRenderer.drawBG(ctx,W,H,this.elapsed,this._worldIdx,this);
     }
-    for(const s of this.bgStars){
-      s.tw+=rawDt*2;
-      if(this.state==='playing')s.x-=s.speed*(1+(this.stage-1)*.15);
-      if(s.x<0){s.x=W+10;s.y=Math.random()*H;}
-      const a=s.alpha*(.6+.4*Math.sin(s.tw));
-      ctx.beginPath();ctx.arc(s.x%W,s.y%H,s.r,0,Math.PI*2);
-      ctx.fillStyle=`rgba(255,255,255,${a})`;ctx.fill();
-    }
+    // World-styled obstacles
     for(const o of this.obstacles){
       const ghostA=this.currentRule.id==='ghost'?(.3+.7*((Math.sin(o.fl)+1)/2)):1;
-      ctx.save();ctx.globalAlpha=ghostA;
-      let topC,botC,glowC;const t=o.theme;
-      if(t.colors){topC=t.colors[0];botC=t.colors[1];glowC=t.glow;}
-      else{topC=`hsl(${this.colorHue%360},100%,60%)`;botC=`hsl(${(this.colorHue+60)%360},100%,40%)`;glowC=topC;}
-      const grd=ctx.createLinearGradient(o.x,o.y,o.x+o.w,o.y+o.h);
-      grd.addColorStop(0,topC);grd.addColorStop(1,botC);
-      ctx.fillStyle=grd;ctx.shadowBlur=14;ctx.shadowColor=glowC;
-      ctx.beginPath();if(ctx.roundRect)ctx.roundRect(o.x,o.y,o.w,o.h,4);else ctx.rect(o.x,o.y,o.w,o.h);
-      ctx.fill();ctx.restore();
+      this.worldRenderer.drawObstacle(ctx,o,this.elapsed,ghostA,this._worldIdx,this.colorHue);
     }
     ctx.shadowBlur=0;
     for(const c of this.coinItems){
