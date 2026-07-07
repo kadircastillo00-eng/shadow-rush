@@ -1,17 +1,43 @@
 // ═══════════════════════════════════════════════════════════
 //  Shadow Rush — AdManager
-//  Capa de integración Google AdMob
+//  Soporta tres modos automáticamente:
 //
-//  Modo 1 — Simulación (web / navegador):
-//    Muestra overlays de anuncio de demostración en pantalla.
-//    Así puedes probar toda la lógica del juego sin IDs reales.
+//  1. NATIVO (APK Capacitor):
+//     Detecta window.Capacitor → llama al SDK nativo de AdMob
+//     vía @capacitor-community/admob. Anuncios reales.
 //
-//  Modo 2 — Nativo (TWA / APK de PWABuilder):
-//    Delega en window.AdMob o window.AdMobPlus (puente nativo).
-//    Descomenta los bloques "NATIVE ADMOB BRIDGE" para activarlo.
+//  2. SIMULACIÓN WEB (navegador / dev):
+//     Muestra overlays de demostración para probar el flujo
+//     sin IDs reales ni APK.
+//
+//  No se necesita ningún cambio de código al cambiar de modo.
 // ═══════════════════════════════════════════════════════════
 import { ADS_CONFIG } from './ads-config.js';
 
+// ── BRIDGE NATIVO: carga Capacitor + AdMob si estamos en APK ──
+let _AdMob      = null;   // instancia del plugin
+let _isNative   = false;  // true solo en APK Android/iOS
+
+const _nativeBridgeReady = (async () => {
+  try {
+    const { Capacitor } = await import('@capacitor/core');
+    if (!Capacitor.isNativePlatform()) return;
+    _isNative = true;
+
+    const mod = await import('@capacitor-community/admob');
+    _AdMob = mod.AdMob;
+
+    await _AdMob.initialize({
+      requestTrackingAuthorization: true,  // solo iOS
+      initializeForTesting: ADS_CONFIG.IS_TESTING,
+    });
+  } catch {
+    _isNative = false;
+    _AdMob    = null;
+  }
+})();
+
+// ── CLASE PRINCIPAL ───────────────────────────────────────────
 export class AdManager {
   constructor() {
     this._cfg           = ADS_CONFIG;
@@ -19,6 +45,18 @@ export class AdManager {
     this._nextThreshold = this._rollThreshold();
     this._lastInterMs   = 0;
     this._overlay       = null;
+  }
+
+  // Devuelve el Ad Unit ID correcto según el modo testing/producción
+  _interstitialId() {
+    return this._cfg.IS_TESTING
+      ? this._cfg.TEST_INTERSTITIAL_ID
+      : this._cfg.INTERSTITIAL_ID;
+  }
+  _rewardedId() {
+    return this._cfg.IS_TESTING
+      ? this._cfg.TEST_REWARDED_ID
+      : this._cfg.REWARDED_ID;
   }
 
   // ── FRECUENCIA / COOLDOWN ─────────────────────────────────
@@ -32,15 +70,11 @@ export class AdManager {
     return (Date.now() - this._lastInterMs) / 1000 >= this._cfg.INTERSTITIAL_COOLDOWN_SEC;
   }
 
-  // Llama antes de cada nueva partida.
-  // Devuelve true si se debe mostrar un intersticial.
   onNewGame() {
     this._gamesPlayed++;
     return this._gamesPlayed >= this._nextThreshold && this._cooldownOk();
   }
 
-  // Llama al cambiar de mundo.
-  // Devuelve true si se debe mostrar un intersticial.
   onWorldChange() {
     return this._cooldownOk() && Math.random() < this._cfg.WORLD_CHANGE_AD_CHANCE;
   }
@@ -49,6 +83,66 @@ export class AdManager {
     this._gamesPlayed   = 0;
     this._nextThreshold = this._rollThreshold();
     this._lastInterMs   = Date.now();
+  }
+
+  // ── INTERSTICIAL ──────────────────────────────────────────
+  showInterstitial() {
+    this._markInterstitialShown();
+    return _isNative && _AdMob
+      ? this._nativeInterstitial()
+      : this._simulateInterstitial();
+  }
+
+  async _nativeInterstitial() {
+    try {
+      await _nativeBridgeReady;
+      await _AdMob.prepareInterstitial({ adId: this._interstitialId() });
+      await _AdMob.showInterstitial();
+    } catch (e) {
+      // El usuario cerró el ad o falló la carga — continuar normalmente
+    }
+  }
+
+  // ── ANUNCIO RECOMPENSADO ───────────────────────────────────
+  showRewarded() {
+    return _isNative && _AdMob
+      ? this._nativeRewarded()
+      : this._simulateRewarded();
+  }
+
+  async _nativeRewarded() {
+    try {
+      await _nativeBridgeReady;
+      return await new Promise(async (resolve) => {
+        let earned = false;
+
+        // El evento Rewarded se dispara mientras el ad aún está visible
+        const rewardSub = await _AdMob.addListener(
+          'onRewardedVideoAdRewardedEvent',
+          () => { earned = true; }
+        );
+        // El evento Closed se dispara cuando el ad se cierra
+        const closeSub = await _AdMob.addListener(
+          'onRewardedVideoAdClosed',
+          () => {
+            rewardSub.remove();
+            closeSub.remove();
+            resolve({ completed: earned });
+          }
+        );
+
+        try {
+          await _AdMob.prepareRewardVideoAd({ adId: this._rewardedId() });
+          await _AdMob.showRewardVideoAd();
+        } catch {
+          rewardSub.remove();
+          closeSub.remove();
+          resolve({ completed: false });
+        }
+      });
+    } catch {
+      return { completed: false };
+    }
   }
 
   // ── DOM HELPERS ───────────────────────────────────────────
@@ -69,32 +163,7 @@ export class AdManager {
     this._getOverlay().classList.add('hidden');
   }
 
-  // ── INTERSTICIAL ──────────────────────────────────────────
-  // Resuelve cuando el anuncio se cierra (saltado o completado).
-  showInterstitial() {
-    this._markInterstitialShown();
-
-    // ── NATIVE ADMOB BRIDGE (TWA / APK) ──────────────────────
-    // Descomenta cuando AdMob esté configurado en tu proyecto Android:
-    //
-    // if (window.AdMob) {
-    //   return new Promise(resolve => {
-    //     window.AdMob.prepareInterstitial(
-    //       { adId: this._cfg.INTERSTITIAL_ID },
-    //       () => window.AdMob.showInterstitial(resolve, resolve),
-    //       resolve
-    //     );
-    //   });
-    // }
-    // if (window.AdMobPlus) {
-    //   return window.AdMobPlus.interstitial.show()
-    //     .then(() => {}).catch(() => {});
-    // }
-
-    // ── SIMULACIÓN WEB ────────────────────────────────────────
-    return this._simulateInterstitial();
-  }
-
+  // ── SIMULACIÓN INTERSTICIAL (web/dev) ────────────────────
   _simulateInterstitial() {
     return new Promise(resolve => {
       this._showPanel('ad-inter-panel');
@@ -129,51 +198,22 @@ export class AdManager {
         }
       }, 1000);
 
-      // Auto-cierre a los 30s por si acaso
       autoCloseId = setTimeout(done, 30_000);
       skipBtn.onclick = done;
     });
   }
 
-  // ── ANUNCIO RECOMPENSADO ───────────────────────────────────
-  // Resuelve con { completed: boolean }
-  showRewarded() {
-    // ── NATIVE ADMOB BRIDGE (TWA / APK) ──────────────────────
-    // Descomenta cuando AdMob esté configurado en tu proyecto Android:
-    //
-    // if (window.AdMob) {
-    //   return new Promise(resolve => {
-    //     window.AdMob.prepareRewardVideoAd(
-    //       { adId: this._cfg.REWARDED_ID },
-    //       () => window.AdMob.showRewardVideoAd(
-    //         () => resolve({ completed: true }),
-    //         () => resolve({ completed: false })
-    //       ),
-    //       () => resolve({ completed: false })
-    //     );
-    //   });
-    // }
-    // if (window.AdMobPlus) {
-    //   return window.AdMobPlus.rewarded.show()
-    //     .then(() => ({ completed: true }))
-    //     .catch(() => ({ completed: false }));
-    // }
-
-    // ── SIMULACIÓN WEB ────────────────────────────────────────
-    return this._simulateRewarded();
-  }
-
+  // ── SIMULACIÓN RECOMPENSADO (web/dev) ────────────────────
   _simulateRewarded() {
     return new Promise(resolve => {
       this._showPanel('ad-rewarded-panel');
 
-      const totalSec   = this._cfg.SIM_REWARDED_DURATION_SEC;
-      const fillEl     = document.getElementById('ad-rew-progress-fill');
-      const timerEl    = document.getElementById('ad-rew-timer');
-      const skipBtn    = document.getElementById('ad-rew-skip');
+      const totalSec = this._cfg.SIM_REWARDED_DURATION_SEC;
+      const fillEl   = document.getElementById('ad-rew-progress-fill');
+      const timerEl  = document.getElementById('ad-rew-timer');
+      const skipBtn  = document.getElementById('ad-rew-skip');
 
-      if (fillEl) fillEl.style.transition = 'none';
-      if (fillEl) { fillEl.style.width = '0%'; void fillEl.offsetWidth; fillEl.style.transition = ''; }
+      if (fillEl) { fillEl.style.transition='none'; fillEl.style.width='0%'; void fillEl.offsetWidth; fillEl.style.transition=''; }
       if (timerEl) timerEl.textContent = `Mira ${totalSec}s para ganar tu revive`;
       skipBtn.classList.remove('hidden');
 

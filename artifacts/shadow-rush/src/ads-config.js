@@ -6,13 +6,12 @@
 //  INSTRUCCIONES:
 //  1. Ve a https://admob.google.com → Apps → Agregar app → Android
 //  2. Copia tu App ID  (formato: ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX)
-//  3. Crea dos Ad Units: uno "Interstitial" y uno "Rewarded Video"
-//  4. Pega los IDs de Ad Unit abajo
+//  3. Crea dos Ad Units: "Interstitial" y "Rewarded Video"
+//  4. Pega los IDs abajo
+//  5. Copia el mismo App ID en capacitor.config.ts → plugins.AdMob.appId
 //
-//  INTEGRACIÓN EN EL APK (TWA / PWABuilder):
-//  — En tu proyecto Android, agrega el SDK de AdMob a build.gradle
-//  — Inicializa AdMob con APP_ID en MainActivity.java
-//  — Descomenta los bloques "NATIVE ADMOB BRIDGE" en src/ad-manager.js
+//  INTEGRACIÓN NATIVA (APK con Capacitor):
+//  — Lee BUILD_ANDROID.md para las instrucciones completas
 // ═══════════════════════════════════════════════════════════
 
 export const ADS_CONFIG = {
@@ -22,21 +21,24 @@ export const ADS_CONFIG = {
   INTERSTITIAL_ID: 'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
   REWARDED_ID:     'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
 
+  // ── MODO PRUEBA ───────────────────────────────────────────
+  // true  → usa IDs de prueba de Google (no genera ingresos, no hay riesgo de ban)
+  // false → usa tus IDs reales (solo en producción)
+  IS_TESTING: false,
+
+  // IDs de anuncios de prueba de Google (no los cambies)
+  TEST_INTERSTITIAL_ID: 'ca-app-pub-3940256099942544/1033173712',
+  TEST_REWARDED_ID:     'ca-app-pub-3940256099942544/5224354917',
+
   // ── FRECUENCIA DE INTERSTICIALES ─────────────────────────
-  // Se muestra uno cada N partidas (número aleatorio entre min y max)
   INTERSTITIAL_FREQ_MIN: 2,
   INTERSTITIAL_FREQ_MAX: 3,
-
-  // Segundos mínimos entre dos intersticiales (cooldown global)
   INTERSTITIAL_COOLDOWN_SEC: 90,
 
-  // Probabilidad (0–1) de mostrar intersticial al cambiar de mundo
-  // (solo si el cooldown también ha transcurrido)
+  // Probabilidad (0–1) de intersticial en cambio de mundo
   WORLD_CHANGE_AD_CHANCE: 0.40,
 
-  // ── SIMULACIÓN (web / dev) ────────────────────────────────
-  // Segundos antes de que aparezca "Saltar" en intersticial simulado
+  // ── SIMULACIÓN WEB (navegador/dev) ────────────────────────
   SIM_INTERSTITIAL_SKIP_AFTER_SEC: 5,
-  // Duración total del anuncio recompensado simulado (segundos)
   SIM_REWARDED_DURATION_SEC: 6,
 };
