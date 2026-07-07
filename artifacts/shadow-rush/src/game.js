@@ -2,6 +2,7 @@
 //  SHADOW RUSH — Full Engine with Real Synthesized Audio
 // ═══════════════════════════════════════════════════════════
 import { WORLDS, WorldRenderer, getWorldIdx } from './worlds.js';
+import { AdManager } from './ad-manager.js';
 
 // ── CINEMATIC CONSTANTS ───────────────────────────────────
 // Duration (seconds) of each world's full-screen cinematic
@@ -1406,8 +1407,12 @@ class ShadowRush {
     this.achMgr = new AchievementManager();
     this.daily  = new DailyReward();
     this.wheel  = new LuckyWheel();
+    this.adMgr  = new AdManager();
 
     this.state  = 'menu';
+    this._reviveUsed    = false;
+    this._reviveTimerId = null;
+    this._adPending     = false;
     this._scoreF= 0; this.score=0; this.coins=0;
     this.stage=1; this.stageTimer=0; this.elapsed=0;
     this.combo=0; this.maxCombo=0; this.comboTimer=0;
@@ -1463,8 +1468,8 @@ class ShadowRush {
 
   _onDown(x,y){
     if(this.state==='countdown'||this.state==='stageclear') return;
-    if(this.state==='menu')    { this._beginCountdown(); return; }
-    if(this.state==='paused'||this.state==='gameover') return;
+    if(this.state==='menu')    { this._requestGameStart(); return; }
+    if(this.state==='paused'||this.state==='gameover'||this.state==='revive_prompt') return;
     if(this.state==='playing') this._playerJump();
   }
 
@@ -1475,6 +1480,20 @@ class ShadowRush {
     this.audio.play('jump');
     const sk=this.skins.getSkin();
     for(let i=0;i<5;i++) this.particles.push(new Particle(this.player.x,this.player.y,(Math.random()-.5)*180,(Math.random()-.5)*180,sk.glow,.4,true));
+  }
+
+  // Punto de entrada para iniciar una partida — comprueba si hay que mostrar intersticial primero
+  async _requestGameStart(){
+    if(this._adPending) return;
+    this._adPending = true;
+    try {
+      if(this.adMgr.onNewGame()){
+        await this.adMgr.showInterstitial();
+      }
+      this._beginCountdown();
+    } finally {
+      this._adPending = false;
+    }
   }
 
   _beginCountdown(){
@@ -1504,6 +1523,8 @@ class ShadowRush {
 
   _startGame(){
     this.state='playing';
+    this._reviveUsed=false;
+    this._clearReviveTimer();
     this._scoreF=0;this.score=0;this.coins=0;
     this.stage=1;this.stageTimer=0;this.elapsed=0;
     this.combo=0;this.maxCombo=0;this.comboTimer=0;
@@ -1551,7 +1572,7 @@ class ShadowRush {
     setTimeout(()=>{ ov.classList.add('hidden'); this._advanceStage(); },2200);
   }
 
-  _advanceStage(){
+  async _advanceStage(){
     this.stage++;this.stageTimer=0;this.obstacles=[];
     this.currentRule=RULES[0];this.ruleTimer=0;
     this.activeEvent=null;this.eventTimer=0;this.eventCooldown=25;
@@ -1562,6 +1583,12 @@ class ShadowRush {
     this._worldIdx=newWorldIdx;
     this.audio.setStage(this.stage);
     this.audio.setWorld(newWorldIdx);
+    // Intersticial al cambiar de mundo (probabilístico + cooldown)
+    if(worldChanged && this.adMgr.onWorldChange()){
+      this.audio.stopBGM(0.2);
+      await this.adMgr.showInterstitial();
+      this.lastTime=performance.now(); // evitar salto de dt tras el anuncio
+    }
     if(worldChanged){
       // Show world cinematic and cross-fade into new world BGM
       this._worldTransition={ worldIdx:newWorldIdx, name:WORLDS[newWorldIdx].name, t:0, duration:CIN_DURATIONS[newWorldIdx] };
@@ -1581,15 +1608,35 @@ class ShadowRush {
       this.shield=false;this.shakeStr=12;
       this._hideEventBanners();this.audio.play('die');vibrate([100]);return;
     }
-    this.state='gameover';
-    // Die SFX (impact crunch — SFX bus, plays immediately)
+
+    // Die SFX + partículas (se muestran tanto si revive como si no)
     this.audio.play('die');
     vibrate([150,80,200]);
-
     const sk=this.skins.getSkin();
     if(this.player){
       for(let i=0;i<30;i++){const a=(i/30)*Math.PI*2,sp=180+Math.random()*260;this.particles.push(new Particle(this.player.x,this.player.y,Math.cos(a)*sp,Math.sin(a)*sp,sk.glow,1.1,true,Math.random()*6+3));}
     }
+
+    // ── REVIVE: mostrar diálogo si no se ha usado aún ─────────
+    if(!this._reviveUsed){
+      this.state='revive_prompt';
+      document.getElementById('hud').classList.add('hidden');
+      this._hideEventBanners();
+      this.audio.stopBGM(0.5);
+      this._showReviveDialog();
+      return;
+    }
+
+    // ── Sin revive disponible: ir directo a Game Over ─────────
+    this._actuallyDie();
+  }
+
+  // Lógica de Game Over definitivo (llamada tras morir sin revive o al saltar)
+  _actuallyDie(){
+    this.state='gameover';
+    document.getElementById('hud').classList.add('hidden');
+    document.getElementById('rule-notification').classList.add('hidden');
+    this._hideEventBanners();
 
     this.wallet.add(this.coins);
     this.stats.gamesPlayed++;this.stats.totalCoins+=this.coins;
@@ -1602,9 +1649,6 @@ class ShadowRush {
     this.missions.update({score:this.score,coins:this.coins,stage:this.stage,combo:this.maxCombo,time:Math.floor(this.elapsed),games:this.stats.gamesPlayed});
     this._checkAchievements();this._checkSecretSkins();
 
-    document.getElementById('hud').classList.add('hidden');
-    document.getElementById('rule-notification').classList.add('hidden');
-    this._hideEventBanners();
     const isNew=wasHighScore;
     document.getElementById('final-score').textContent=this.score;
     document.getElementById('final-best').textContent=this.stats.highScore;
@@ -1616,11 +1660,84 @@ class ShadowRush {
     this._updateMenuUI();
 
     // Play appropriate jingle then cross-fade into menu BGM
-    // New high score → triumphant victory jingle; otherwise → mournful game-over jingle
     const jingleMs = isNew
       ? this.audio.playVictoryJingle()
       : this.audio.playGameOverJingle();
     setTimeout(() => this.audio.startMenuBGM(), jingleMs + 600);
+  }
+
+  // ── REVIVE DIALOG ────────────────────────────────────────
+  _showReviveDialog(){
+    const REVIVE_SECS = 5;
+    const modal = document.getElementById('revive-modal');
+    const numEl  = document.getElementById('revive-timer-num');
+    const ringEl = document.getElementById('revive-ring-fill');
+    const CIRC   = 163.4; // 2π × 26
+
+    modal.classList.remove('hidden');
+    numEl.textContent = REVIVE_SECS;
+    ringEl.style.transition = 'none';
+    ringEl.style.strokeDashoffset = '0';
+    void ringEl.offsetWidth;
+    ringEl.style.transition = 'stroke-dashoffset 1s linear';
+
+    let remaining = REVIVE_SECS;
+    this._reviveTimerId = setInterval(()=>{
+      remaining--;
+      numEl.textContent = remaining;
+      ringEl.style.strokeDashoffset = String(CIRC * (1 - remaining / REVIVE_SECS));
+      if(remaining <= 0){
+        this._clearReviveTimer();
+        this._skipRevive();
+      }
+    }, 1000);
+  }
+
+  _clearReviveTimer(){
+    if(this._reviveTimerId){ clearInterval(this._reviveTimerId); this._reviveTimerId=null; }
+  }
+
+  _skipRevive(){
+    this._clearReviveTimer();
+    document.getElementById('revive-modal').classList.add('hidden');
+    this._actuallyDie();
+  }
+
+  async _onReviveWatchAd(){
+    this._clearReviveTimer();
+    document.getElementById('revive-modal').classList.add('hidden');
+    const result = await this.adMgr.showRewarded();
+    if(result.completed){
+      this._revivePlayer();
+    } else {
+      this._actuallyDie();
+    }
+  }
+
+  _revivePlayer(){
+    this._reviveUsed = true;
+    // Limpiar obstáculos cercanos para dar margen de seguridad
+    if(this.player){
+      this.obstacles = this.obstacles.filter(o => o.x > this.player.x + 160);
+      // Reposicionar verticalmente al centro si está fuera de pantalla
+      this.player.vy = 0;
+      this.player.y  = Math.min(Math.max(this.player.y, this.H * 0.15), this.H * 0.82);
+    }
+    // Dar escudo temporal de 3 segundos (invencibilidad)
+    this.shield = true;
+    setTimeout(()=>{ if(this.shield) this.shield=false; }, 3000);
+    // Resetear combo (penalización justa)
+    this.combo=0; this.comboTimer=0;
+    // Partículas de revive (efecto verde)
+    if(this.player){
+      for(let i=0;i<20;i++){const a=(i/20)*Math.PI*2,sp=120+Math.random()*140;this.particles.push(new Particle(this.player.x,this.player.y,Math.cos(a)*sp,Math.sin(a)*sp,'#30d158',.9));}
+    }
+    // Reanudar juego
+    this.state='playing';
+    this.lastTime=performance.now();
+    document.getElementById('hud').classList.remove('hidden');
+    this.audio.startGameBGM();
+    this._updateHUD();
   }
 
   _checkAchievements(){
@@ -1938,7 +2055,7 @@ class ShadowRush {
       if(this.doubleCoins){ctx.shadowBlur=0;ctx.fillStyle='#fff';ctx.font='bold 8px Orbitron,monospace';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText('x2',c.x,c.y-c.r-2);}
       ctx.restore();
     }
-    if(this.player&&this.state!=='gameover')this._renderPlayer(ctx);
+    if(this.player&&this.state!=='gameover'&&this.state!=='revive_prompt')this._renderPlayer(ctx);
     for(const f of this.floatTexts)f.draw(ctx);
     const gs=this._glowScale;
     for(const p of this.particles)p.draw(ctx,gs);
@@ -2008,7 +2125,7 @@ class ShadowRush {
 
   _setupUI(){
     // ── Play & menu ──
-    this._btn('play-btn',     ()=>{ if(this.state==='menu') this._beginCountdown(); });
+    this._btn('play-btn',     ()=>{ if(this.state==='menu') this._requestGameStart(); });
     this._btn('shop-btn',     ()=>this._openShop());
     this._btn('missions-btn', ()=>this._openMissions());
     this._btn('wheel-btn',    ()=>this._openWheel());
@@ -2025,15 +2142,19 @@ class ShadowRush {
 
     // ── Pause ──
     this._btn('resume-btn',       ()=>this._togglePause());
-    this._btn('restart-btn',      ()=>{ this._closeAll(); this._beginCountdown(); });
+    this._btn('restart-btn',      ()=>{ this._closeAll(); this._requestGameStart(); });
     this._btn('pause-shop-btn',   ()=>{ document.getElementById('pause-menu').classList.add('hidden'); this._openShop('pause'); });
     this._btn('pause-settings-btn',()=>{ document.getElementById('pause-menu').classList.add('hidden'); this._openSettings('pause'); });
     this._btn('home-btn', ()=>{ this.state='menu'; this.audio.stopBGM(); this._closeAll(); document.getElementById('start-screen').classList.remove('hidden'); this._updateMenuUI(); this.audio.startMenuBGM(); });
 
     // ── Game Over ──
-    this._btn('gameover-restart-btn', ()=>{ this._closeAll(); this._beginCountdown(); });
+    this._btn('gameover-restart-btn', ()=>{ this._closeAll(); this._requestGameStart(); });
     this._btn('gameover-shop-btn',    ()=>{ document.getElementById('game-over').classList.add('hidden'); this._openShop('gameover'); });
     this._btn('gameover-home-btn',    ()=>{ this._closeAll(); document.getElementById('start-screen').classList.remove('hidden'); this.state='menu'; this._updateMenuUI(); this.audio.startMenuBGM(); });
+
+    // ── Revive Dialog ──
+    this._btn('revive-watch-btn', ()=>{ if(this.state==='revive_prompt') this._onReviveWatchAd(); });
+    this._btn('revive-skip-btn',  ()=>{ if(this.state==='revive_prompt') this._skipRevive(); });
 
     // ── Settings ──
     // Master volume slider
@@ -2101,9 +2222,10 @@ class ShadowRush {
   _closeAll(){
     ['start-screen','pause-menu','game-over','shop-modal','missions-modal',
      'daily-modal','wheel-modal','stats-modal','settings-modal',
-     'stage-clear-overlay','countdown-overlay'].forEach(id=>{
+     'stage-clear-overlay','countdown-overlay','revive-modal'].forEach(id=>{
       const el=document.getElementById(id);if(el)el.classList.add('hidden');
     });
+    this._clearReviveTimer();
     document.getElementById('hud')?.classList.add('hidden');
   }
 

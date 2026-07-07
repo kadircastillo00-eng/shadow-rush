@@ -270,6 +270,60 @@
     </div>
   </div>
 
+  <!-- REVIVE — Ver anuncio para continuar -->
+  <div id="revive-modal" class="overlay hidden">
+    <div class="overlay-content revive-content">
+      <div class="revive-skull">💀</div>
+      <h2 class="revive-title">YOU DIED</h2>
+      <p class="revive-subtitle">Mira un anuncio corto para continuar<br>exactamente donde moriste</p>
+      <div id="revive-timer-wrap">
+        <svg id="revive-ring" viewBox="0 0 60 60">
+          <circle class="revive-ring-bg"   cx="30" cy="30" r="26"/>
+          <circle id="revive-ring-fill" class="revive-ring-fill" cx="30" cy="30" r="26"/>
+        </svg>
+        <div id="revive-timer-num">5</div>
+      </div>
+      <button id="revive-watch-btn" class="btn btn-gold btn-pulse">📺 VER ANUNCIO — REVIVIR</button>
+      <div class="revive-note">1 revive por partida</div>
+      <button id="revive-skip-btn" class="btn btn-ghost">✕ Saltar — Game Over</button>
+    </div>
+  </div>
+
+  <!-- AD OVERLAY — Simulación en web; reemplazado por AdMob nativo en APK -->
+  <div id="ad-overlay" class="hidden">
+    <!-- Panel intersticial -->
+    <div id="ad-inter-panel">
+      <div class="ad-label-bar">
+        <span class="ad-label-text">PUBLICIDAD</span>
+        <button id="ad-inter-skip" class="ad-skip-btn hidden">✕ Saltar</button>
+      </div>
+      <div class="ad-sim-content">
+        <div class="ad-sim-icon">📱</div>
+        <div class="ad-sim-title">Tu Anuncio Aquí</div>
+        <div class="ad-sim-body">Reemplaza esto con tu Google AdMob<br><strong>Interstitial Ad Unit</strong></div>
+        <div class="ad-sim-id">ID: INTERSTITIAL_AD_UNIT</div>
+      </div>
+      <div id="ad-inter-timer" class="ad-timer-text"></div>
+    </div>
+    <!-- Panel anuncio recompensado -->
+    <div id="ad-rewarded-panel" class="hidden">
+      <div class="ad-label-bar">
+        <span class="ad-label-text">ANUNCIO RECOMPENSADO — Míralo para revivir</span>
+        <button id="ad-rew-skip" class="ad-skip-btn">✕ Cerrar (perder revive)</button>
+      </div>
+      <div class="ad-sim-content">
+        <div class="ad-sim-icon">🎬</div>
+        <div class="ad-sim-title">Tu Anuncio Recompensado</div>
+        <div class="ad-sim-body">Reemplaza esto con tu Google AdMob<br><strong>Rewarded Ad Unit</strong></div>
+        <div class="ad-sim-id">ID: REWARDED_AD_UNIT</div>
+      </div>
+      <div class="ad-rew-progress-wrap">
+        <div class="ad-rew-progress-bar"><div id="ad-rew-progress-fill"></div></div>
+        <div id="ad-rew-timer" class="ad-timer-text"></div>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="/src/game.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
