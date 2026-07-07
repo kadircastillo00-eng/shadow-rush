@@ -20,6 +20,7 @@ export const ADS_CONFIG = {
   APP_ID:          'ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX',
   INTERSTITIAL_ID: 'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
   REWARDED_ID:     'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
+  BANNER_ID:       'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
 
   // ── MODO PRUEBA ───────────────────────────────────────────
   // true  → usa IDs de prueba de Google (no genera ingresos, no hay riesgo de ban)
@@ -29,6 +30,7 @@ export const ADS_CONFIG = {
   // IDs de anuncios de prueba de Google (no los cambies)
   TEST_INTERSTITIAL_ID: 'ca-app-pub-3940256099942544/1033173712',
   TEST_REWARDED_ID:     'ca-app-pub-3940256099942544/5224354917',
+  TEST_BANNER_ID:       'ca-app-pub-3940256099942544/6300978111',
 
   // ── FRECUENCIA DE INTERSTICIALES ─────────────────────────
   INTERSTITIAL_FREQ_MIN: 2,

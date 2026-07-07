@@ -222,6 +222,54 @@ html, body { width:100%; height:100%; overflow:hidden; background:var(--bg); fon
 #pause-info { font-family:var(--font-g); font-size:12px; color:rgba(255,255,255,.4); letter-spacing:2px; text-align:center; }
 
 /* ── AD OVERLAY ─────────────────────────────────────────── */
+/* ── BANNER ADMOB ──────────────────────────────────────────── */
+/* Variable: altura real del banner nativo (sobrescrita vía JS) */
+:root { --admob-banner-h: 60px; }
+
+#ad-banner-sim {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 90;                    /* debajo de overlays del juego */
+  height: var(--admob-banner-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(5, 5, 16, 0.97);
+  border-top: 1px solid rgba(255,255,255,.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: bannerSlideUp .3s cubic-bezier(.22,1,.36,1) both;
+}
+#ad-banner-sim.hidden { display: none; }
+@keyframes bannerSlideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.ad-banner-label {
+  font-family: var(--font-g);
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: rgba(255,255,255,.25);
+  flex-shrink: 0;
+}
+.ad-banner-text {
+  font-size: 11px;
+  color: rgba(255,255,255,.35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70vw;
+}
+
+/* Empuja el contenido del menú cuando el banner está visible    */
+/* (en APK nativo, el banner flota sobre el WebView y usa        */
+/*  --admob-banner-h que se actualiza desde el evento nativo)    */
+body.banner-visible #start-screen {
+  padding-bottom: calc(var(--admob-banner-h) + 8px);
+}
+
+/* ── ANUNCIOS OVERLAY ──────────────────────────────────────── */
 #ad-overlay {
   position:fixed; inset:0; z-index:200;
   background:#000;

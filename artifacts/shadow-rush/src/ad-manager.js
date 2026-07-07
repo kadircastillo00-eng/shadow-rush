@@ -3,8 +3,8 @@
 //  Soporta tres modos automáticamente:
 //
 //  1. NATIVO (APK Capacitor):
-//     Detecta window.Capacitor → llama al SDK nativo de AdMob
-//     vía @capacitor-community/admob. Anuncios reales.
+//     Detecta Capacitor.isNativePlatform() → llama al SDK nativo
+//     de AdMob vía @capacitor-community/admob. Anuncios reales.
 //
 //  2. SIMULACIÓN WEB (navegador / dev):
 //     Muestra overlays de demostración para probar el flujo
@@ -15,8 +15,10 @@
 import { ADS_CONFIG } from './ads-config.js';
 
 // ── BRIDGE NATIVO: carga Capacitor + AdMob si estamos en APK ──
-let _AdMob      = null;   // instancia del plugin
-let _isNative   = false;  // true solo en APK Android/iOS
+let _AdMob            = null;
+let _BannerAdSize     = null;
+let _BannerAdPosition = null;
+let _isNative         = false;
 
 const _nativeBridgeReady = (async () => {
   try {
@@ -25,11 +27,18 @@ const _nativeBridgeReady = (async () => {
     _isNative = true;
 
     const mod = await import('@capacitor-community/admob');
-    _AdMob = mod.AdMob;
+    _AdMob            = mod.AdMob;
+    _BannerAdSize     = mod.BannerAdSize;
+    _BannerAdPosition = mod.BannerAdPosition;
 
     await _AdMob.initialize({
-      requestTrackingAuthorization: true,  // solo iOS
+      requestTrackingAuthorization: true,   // solo iOS
       initializeForTesting: ADS_CONFIG.IS_TESTING,
+    });
+
+    // Ajusta el padding inferior al tamaño real del banner nativo
+    _AdMob.addListener('bannerAdSizeChanged', ({ height }) => {
+      document.documentElement.style.setProperty('--admob-banner-h', height + 'px');
     });
   } catch {
     _isNative = false;
@@ -45,18 +54,18 @@ export class AdManager {
     this._nextThreshold = this._rollThreshold();
     this._lastInterMs   = 0;
     this._overlay       = null;
+    this._bannerVisible = false;
   }
 
-  // Devuelve el Ad Unit ID correcto según el modo testing/producción
+  // ── IDs SEGÚN MODO ────────────────────────────────────────
   _interstitialId() {
-    return this._cfg.IS_TESTING
-      ? this._cfg.TEST_INTERSTITIAL_ID
-      : this._cfg.INTERSTITIAL_ID;
+    return this._cfg.IS_TESTING ? this._cfg.TEST_INTERSTITIAL_ID : this._cfg.INTERSTITIAL_ID;
   }
   _rewardedId() {
-    return this._cfg.IS_TESTING
-      ? this._cfg.TEST_REWARDED_ID
-      : this._cfg.REWARDED_ID;
+    return this._cfg.IS_TESTING ? this._cfg.TEST_REWARDED_ID : this._cfg.REWARDED_ID;
+  }
+  _bannerId() {
+    return this._cfg.IS_TESTING ? this._cfg.TEST_BANNER_ID : this._cfg.BANNER_ID;
   }
 
   // ── FRECUENCIA / COOLDOWN ─────────────────────────────────
@@ -85,6 +94,65 @@ export class AdManager {
     this._lastInterMs   = Date.now();
   }
 
+  // ── BANNER ────────────────────────────────────────────────
+  // Mostrar banner en la parte inferior (solo en menú)
+  async showBanner() {
+    if (this._bannerVisible) return;
+    this._bannerVisible = true;
+    if (_isNative && _AdMob) {
+      await this._nativeBannerShow();
+    } else {
+      this._simBannerShow();
+    }
+  }
+
+  // Ocultar banner (al iniciar partida)
+  async hideBanner() {
+    if (!this._bannerVisible) return;
+    this._bannerVisible = false;
+    if (_isNative && _AdMob) {
+      await this._nativeBannerHide();
+    } else {
+      this._simBannerHide();
+    }
+  }
+
+  async _nativeBannerShow() {
+    try {
+      await _nativeBridgeReady;
+      if (!_AdMob) return;
+      await _AdMob.showBanner({
+        adId:     this._bannerId(),
+        adSize:   _BannerAdSize?.ADAPTIVE_BANNER   ?? 'ADAPTIVE_BANNER',
+        position: _BannerAdPosition?.BOTTOM_CENTER ?? 'BOTTOM_CENTER',
+        margin:   0,
+        isTesting: this._cfg.IS_TESTING,
+      });
+      document.body.classList.add('banner-visible');
+    } catch { /* continua sin banner si falla */ }
+  }
+
+  async _nativeBannerHide() {
+    try {
+      await _nativeBridgeReady;
+      if (!_AdMob) return;
+      await _AdMob.hideBanner();
+      document.body.classList.remove('banner-visible');
+    } catch {}
+  }
+
+  _simBannerShow() {
+    const el = document.getElementById('ad-banner-sim');
+    if (el) el.classList.remove('hidden');
+    document.body.classList.add('banner-visible');
+  }
+
+  _simBannerHide() {
+    const el = document.getElementById('ad-banner-sim');
+    if (el) el.classList.add('hidden');
+    document.body.classList.remove('banner-visible');
+  }
+
   // ── INTERSTICIAL ──────────────────────────────────────────
   showInterstitial() {
     this._markInterstitialShown();
@@ -98,9 +166,7 @@ export class AdManager {
       await _nativeBridgeReady;
       await _AdMob.prepareInterstitial({ adId: this._interstitialId() });
       await _AdMob.showInterstitial();
-    } catch (e) {
-      // El usuario cerró el ad o falló la carga — continuar normalmente
-    }
+    } catch { /* continua si falla */ }
   }
 
   // ── ANUNCIO RECOMPENSADO ───────────────────────────────────
@@ -116,12 +182,10 @@ export class AdManager {
       return await new Promise(async (resolve) => {
         let earned = false;
 
-        // El evento Rewarded se dispara mientras el ad aún está visible
         const rewardSub = await _AdMob.addListener(
           'onRewardedVideoAdRewardedEvent',
           () => { earned = true; }
         );
-        // El evento Closed se dispara cuando el ad se cierra
         const closeSub = await _AdMob.addListener(
           'onRewardedVideoAdClosed',
           () => {

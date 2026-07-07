@@ -1497,6 +1497,7 @@ class ShadowRush {
   }
 
   _beginCountdown(){
+    this.adMgr.hideBanner();
     this.state='countdown';
     this._hideOverlays();
     // Start menu music fade during countdown; startGameBGM in _startGame
@@ -1985,6 +1986,8 @@ class ShadowRush {
     document.getElementById('menu-highscore').textContent=this.stats.highScore||0;
     document.getElementById('daily-reward-btn').classList.toggle('hidden',!this.daily.canClaim());
     document.getElementById('wheel-btn').classList.toggle('highlight',this.wheel.canSpin());
+    // Muestra el banner solo cuando el menú principal está activo
+    if(this.state==='menu') this.adMgr.showBanner();
   }
   _updateAudioUI(){
     // Master volume
