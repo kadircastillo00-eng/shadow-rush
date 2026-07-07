@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Shadow Rush</string>
+    <string name="title_activity_main">Shadow Rush</string>
+    <string name="package_name">com.shadowrush.game</string>
+    <string name="custom_url_scheme">com.shadowrush.game</string>
+</resources>

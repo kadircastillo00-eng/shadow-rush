@@ -19,9 +19,7 @@ const config: CapacitorConfig = {
   // ── PLUGINS ─────────────────────────────────────────────
   plugins: {
     AdMob: {
-      // ↓ Tu AdMob App ID — el mismo que ADS_CONFIG.APP_ID en src/ads-config.js
-      // Formato: ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX
-      appId: 'ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX',
+      appId: 'ca-app-pub-1783386752606440~3992016204',
 
       // Activa solo durante pruebas — nunca en producción
       isTesting: false,

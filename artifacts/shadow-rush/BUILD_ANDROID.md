@@ -47,28 +47,22 @@ plugins: {
 
 ---
 
-## Paso 2 — Primera vez: genera el proyecto Android
+## Paso 2 — ✅ Ya hecho: proyecto Android generado
 
-Desde la carpeta `artifacts/shadow-rush/`:
+El proyecto `android/` ya está creado y configurado con:
+- `AndroidManifest.xml` con tu App ID de AdMob real inyectado
+- `build.gradle` con `play-services-ads` incluido automáticamente vía el plugin
+- Plugin `@capacitor-community/admob@8.0.0` enlazado
+- Kotlin 2.0.21 configurado en el root `build.gradle`
 
-```bash
-# Instala dependencias (si no lo has hecho)
-pnpm install
-
-# Genera el proyecto Android (solo la primera vez)
-npx cap add android
-```
-
-Esto crea la carpeta `android/` con:
-- `AndroidManifest.xml` con el App ID de AdMob inyectado
-- `build.gradle` con el SDK de AdMob añadido
-- Todo el código nativo generado automáticamente
+**No necesitas volver a ejecutar `npx cap add android`.**
 
 ---
 
 ## Paso 3 — Build y sync (cada vez que cambies código)
 
 ```bash
+cd artifacts/shadow-rush
 pnpm run cap:sync
 ```
 
@@ -98,6 +92,19 @@ android/app/build/outputs/apk/release/app-release.apk
 pnpm run cap:open
 ```
 Se abre Android Studio. Luego: **Build → Build Bundle(s) / APK(s) → Build APK(s)**
+
+---
+
+## Tus IDs de AdMob (ya configurados)
+
+| Campo | Valor |
+|---|---|
+| App ID | `ca-app-pub-1783386752606440~3992016204` |
+| Banner | `ca-app-pub-1783386752606440/3447266892` |
+| Interstitial | `ca-app-pub-1783386752606440/2922477112` |
+| Rewarded | `ca-app-pub-1783386752606440/5357068766` |
+
+Ya están en `src/ads-config.js`, `capacitor.config.ts` y `android/app/src/main/AndroidManifest.xml`.
 
 ---
 

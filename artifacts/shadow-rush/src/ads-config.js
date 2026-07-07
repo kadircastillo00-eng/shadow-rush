@@ -16,11 +16,11 @@
 
 export const ADS_CONFIG = {
 
-  // ── REEMPLAZA CON TUS IDs DE ADMOB ────────────────────────
-  APP_ID:          'ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX',
-  INTERSTITIAL_ID: 'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
-  REWARDED_ID:     'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
-  BANNER_ID:       'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
+  // ── IDs REALES DE ADMOB ───────────────────────────────────
+  APP_ID:          'ca-app-pub-1783386752606440~3992016204',
+  INTERSTITIAL_ID: 'ca-app-pub-1783386752606440/2922477112',
+  REWARDED_ID:     'ca-app-pub-1783386752606440/5357068766',
+  BANNER_ID:       'ca-app-pub-1783386752606440/3447266892',
 
   // ── MODO PRUEBA ───────────────────────────────────────────
   // true  → usa IDs de prueba de Google (no genera ingresos, no hay riesgo de ban)
