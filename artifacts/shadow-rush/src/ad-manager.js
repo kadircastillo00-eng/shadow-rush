@@ -15,10 +15,11 @@
 import { ADS_CONFIG } from './ads-config.js';
 
 // ── BRIDGE NATIVO: carga Capacitor + AdMob si estamos en APK ──
-let _AdMob            = null;
-let _BannerAdSize     = null;
-let _BannerAdPosition = null;
-let _isNative         = false;
+let _AdMob                = null;
+let _BannerAdSize         = null;
+let _BannerAdPosition     = null;
+let _RewardAdPluginEvents = null;
+let _isNative             = false;
 
 const _nativeBridgeReady = (async () => {
   try {
@@ -26,10 +27,13 @@ const _nativeBridgeReady = (async () => {
     if (!Capacitor.isNativePlatform()) return;
     _isNative = true;
 
+    // API de @capacitor-community/admob v8: AdMob, enums y tipos se
+    // exportan todos desde el paquete raíz (ver dist/esm/index.d.ts).
     const mod = await import('@capacitor-community/admob');
-    _AdMob            = mod.AdMob;
-    _BannerAdSize     = mod.BannerAdSize;
-    _BannerAdPosition = mod.BannerAdPosition;
+    _AdMob                = mod.AdMob;
+    _BannerAdSize         = mod.BannerAdSize;
+    _BannerAdPosition     = mod.BannerAdPosition;
+    _RewardAdPluginEvents = mod.RewardAdPluginEvents;
 
     await _AdMob.initialize({
       requestTrackingAuthorization: true,   // solo iOS
@@ -164,7 +168,11 @@ export class AdManager {
   async _nativeInterstitial() {
     try {
       await _nativeBridgeReady;
-      await _AdMob.prepareInterstitial({ adId: this._interstitialId() });
+      if (!_AdMob) return;
+      await _AdMob.prepareInterstitial({
+        adId:      this._interstitialId(),
+        isTesting: this._cfg.IS_TESTING,
+      });
       await _AdMob.showInterstitial();
     } catch { /* continua si falla */ }
   }
@@ -176,33 +184,62 @@ export class AdManager {
       : this._simulateRewarded();
   }
 
+  // API real de @capacitor-community/admob v8 para anuncios recompensados:
+  //   - prepareRewardVideoAd({ adId, isTesting }) → precarga el video
+  //   - showRewardVideoAd() → lo muestra (no resuelve "completado", solo que se mostró)
+  //   - evento RewardAdPluginEvents.Rewarded ('onRewardedVideoAdReward') → se emite
+  //     SOLO si el usuario vio el anuncio completo y ganó la recompensa
+  //   - evento RewardAdPluginEvents.Dismissed ('onRewardedVideoAdDismissed') → se emite
+  //     siempre que el anuncio se cierra (visto completo o cerrado antes de tiempo)
+  // El jugador solo debe revivir si "Dismissed" llega DESPUÉS de "Rewarded".
   async _nativeRewarded() {
     try {
       await _nativeBridgeReady;
-      return await new Promise(async (resolve) => {
-        let earned = false;
+      if (!_AdMob) return { completed: false };
 
-        const rewardSub = await _AdMob.addListener(
-          'onRewardedVideoAdRewardedEvent',
-          () => { earned = true; }
-        );
-        const closeSub = await _AdMob.addListener(
-          'onRewardedVideoAdClosed',
-          () => {
-            rewardSub.remove();
-            closeSub.remove();
-            resolve({ completed: earned });
-          }
-        );
+      return await new Promise((resolve) => {
+        let earned   = false;
+        let settled  = false;
+        let handles  = [];
 
-        try {
-          await _AdMob.prepareRewardVideoAd({ adId: this._rewardedId() });
-          await _AdMob.showRewardVideoAd();
-        } catch {
-          rewardSub.remove();
-          closeSub.remove();
-          resolve({ completed: false });
-        }
+        const finish = (completed) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(watchdog);
+          handles.forEach(h => h.remove());
+          resolve({ completed });
+        };
+
+        // Salvaguarda: si el plugin nunca emite un evento de cierre
+        // (fallo del OEM / SDK), no dejar la promesa colgada para siempre.
+        const watchdog = setTimeout(() => finish(false), 60_000);
+
+        const events = _RewardAdPluginEvents ?? {
+          Rewarded:     'onRewardedVideoAdReward',
+          Dismissed:    'onRewardedVideoAdDismissed',
+          FailedToShow: 'onRewardedVideoAdFailedToShow',
+          FailedToLoad: 'onRewardedVideoAdFailedToLoad',
+        };
+
+        Promise.all([
+          _AdMob.addListener(events.Rewarded,     () => { earned = true; }),
+          _AdMob.addListener(events.Dismissed,    () => finish(earned)),
+          _AdMob.addListener(events.FailedToShow, () => finish(false)),
+          _AdMob.addListener(events.FailedToLoad, () => finish(false)),
+        ])
+          .then(async (subs) => {
+            handles = subs;
+            try {
+              await _AdMob.prepareRewardVideoAd({
+                adId:      this._rewardedId(),
+                isTesting: this._cfg.IS_TESTING,
+              });
+              await _AdMob.showRewardVideoAd();
+            } catch {
+              finish(false);
+            }
+          })
+          .catch(() => finish(false));
       });
     } catch {
       return { completed: false };
