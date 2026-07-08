@@ -1,0 +1,11 @@
+
+> @workspace/shadow-rush@0.0.0 dev /app/artifacts/shadow-rush
+> vite --config vite.config.ts --host 0.0.0.0
+
+
+  VITE v7.3.5  ready in 513 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://192.168.0.2:3000/
+5:31:29 AM [vite] (client) page reload src/ad-manager.js
+ ELIFECYCLE  Command failed.
