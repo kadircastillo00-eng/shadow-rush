@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "YIg28MeUtPn834VAe-VdK"
+uri = "file://downloads/shadow-rush-project.zip"
+type = "unspecified"
+title = "Shadow Rush — proyecto completo (con correcciones AdMob v8)"
