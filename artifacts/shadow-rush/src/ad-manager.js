@@ -182,12 +182,13 @@ export class AdManager {
       return await new Promise(async (resolve) => {
         let earned = false;
 
+        // AdMob v8 Event names: rewardAdRewarded, rewardAdDismissed
         const rewardSub = await _AdMob.addListener(
-          'onRewardedVideoAdRewardedEvent',
+          'rewardAdRewarded',
           () => { earned = true; }
         );
         const closeSub = await _AdMob.addListener(
-          'onRewardedVideoAdClosed',
+          'rewardAdDismissed',
           () => {
             rewardSub.remove();
             closeSub.remove();
@@ -196,9 +197,11 @@ export class AdManager {
         );
 
         try {
-          await _AdMob.prepareRewardVideoAd({ adId: this._rewardedId() });
-          await _AdMob.showRewardVideoAd();
-        } catch {
+          // AdMob v8 method names: prepareRewardedAd, showRewardedAd
+          await _AdMob.prepareRewardedAd({ adId: this._rewardedId() });
+          await _AdMob.showRewardedAd();
+        } catch (err) {
+          console.error('AdMob Rewarded Ad error:', err);
           rewardSub.remove();
           closeSub.remove();
           resolve({ completed: false });
