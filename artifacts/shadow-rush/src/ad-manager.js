@@ -184,66 +184,94 @@ export class AdManager {
       : this._simulateRewarded();
   }
 
-  // API real de @capacitor-community/admob v8 para anuncios recompensados:
-  //   - prepareRewardVideoAd({ adId, isTesting }) → precarga el video
-  //   - showRewardVideoAd() → lo muestra (no resuelve "completado", solo que se mostró)
-  //   - evento RewardAdPluginEvents.Rewarded ('onRewardedVideoAdReward') → se emite
-  //     SOLO si el usuario vio el anuncio completo y ganó la recompensa
-  //   - evento RewardAdPluginEvents.Dismissed ('onRewardedVideoAdDismissed') → se emite
-  //     siempre que el anuncio se cierra (visto completo o cerrado antes de tiempo)
-  // El jugador solo debe revivir si "Dismissed" llega DESPUÉS de "Rewarded".
+  // API de @capacitor-community/admob v8 — flujo orientado a eventos:
+  //
+  //  prepareRewardVideoAd() inicia la carga; cuando el SDK termina de
+  //  descargar el video dispara el evento Loaded. Solo entonces llamamos
+  //  showRewardVideoAd(). El evento Rewarded se emite ÚNICAMENTE si el
+  //  usuario vio el anuncio completo. Dismissed se emite siempre al cerrar
+  //  (con o sin recompensa). El jugador revive solo si Dismissed llega
+  //  después de Rewarded.
+  //
+  //  Eventos v8 (RewardAdPluginEvents):
+  //    Loaded       → 'onRewardedVideoAdLoaded'
+  //    Rewarded     → 'onRewardedVideoAdReward'
+  //    Dismissed    → 'onRewardedVideoAdDismissed'
+  //    FailedToLoad → 'onRewardedVideoAdFailedToLoad'
+  //    FailedToShow → 'onRewardedVideoAdFailedToShow'
   async _nativeRewarded() {
+    // 1 ── Esperar a que el bridge nativo esté listo.
+    try { await _nativeBridgeReady; } catch { return { completed: false }; }
+    if (!_AdMob) return { completed: false };
+
+    // Nombres de eventos del enum real de @capacitor-community/admob v8.
+    // El fallback cubre el caso extremo en que el import dinámico falle.
+    const ev = _RewardAdPluginEvents ?? {
+      Loaded:       'onRewardedVideoAdLoaded',
+      Rewarded:     'onRewardedVideoAdReward',
+      Dismissed:    'onRewardedVideoAdDismissed',
+      FailedToShow: 'onRewardedVideoAdFailedToShow',
+      FailedToLoad: 'onRewardedVideoAdFailedToLoad',
+    };
+
+    // 2 ── Crear la promesa con su resolve expuesto afuera del constructor
+    //       para poder resolverla desde código async sin usar `async` en el
+    //       executor (anti-patrón que silencia errores).
+    let _resolve;
+    const adPromise = new Promise(r => { _resolve = r; });
+
+    let earned  = false;
+    let settled = false;
+    const subs  = [];   // handles de los listeners; push inmediato = sin race
+
+    // finish() se llama exactamente una vez (settled guard).
+    // Limpia TODOS los listeners ya registrados en subs, sin importar
+    // cuántos se hayan acumulado antes del fallo.
+    const finish = (completed) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdog);
+      subs.forEach(h => { try { h.remove(); } catch (_) {} });
+      _resolve({ completed });
+    };
+
+    // Salvaguarda: 60 s sin eventos → fallo silencioso del SDK/OEM.
+    const watchdog = setTimeout(() => finish(false), 60_000);
+
+    // 3 ── Registro SECUENCIAL de listeners.
+    //       Cada handle se añade a subs inmediatamente con await+push.
+    //       Si cualquier addListener falla, subs contiene todos los handles
+    //       ya registrados → finish(false) los limpia correctamente.
+    //       Con Promise.all los handles perdidos si el .then() no se ejecuta.
     try {
-      await _nativeBridgeReady;
-      if (!_AdMob) return { completed: false };
+      subs.push(await _AdMob.addListener(ev.Loaded, () => {
+        // Loaded → el video está descargado; ahora sí es seguro mostrarlo.
+        _AdMob.showRewardVideoAd().catch(() => finish(false));
+      }));
+      subs.push(await _AdMob.addListener(ev.Rewarded, () => {
+        // Rewarded → el usuario vio el anuncio completo y ganó la recompensa.
+        earned = true;
+      }));
+      subs.push(await _AdMob.addListener(ev.Dismissed, () => {
+        // Dismissed → el anuncio se cerró (con o sin recompensa).
+        // completed = true solo si Rewarded se emitió antes que Dismissed.
+        finish(earned);
+      }));
+      subs.push(await _AdMob.addListener(ev.FailedToShow, () => finish(false)));
+      subs.push(await _AdMob.addListener(ev.FailedToLoad, () => finish(false)));
 
-      return await new Promise((resolve) => {
-        let earned   = false;
-        let settled  = false;
-        let handles  = [];
-
-        const finish = (completed) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(watchdog);
-          handles.forEach(h => h.remove());
-          resolve({ completed });
-        };
-
-        // Salvaguarda: si el plugin nunca emite un evento de cierre
-        // (fallo del OEM / SDK), no dejar la promesa colgada para siempre.
-        const watchdog = setTimeout(() => finish(false), 60_000);
-
-        const events = _RewardAdPluginEvents ?? {
-          Rewarded:     'onRewardedVideoAdReward',
-          Dismissed:    'onRewardedVideoAdDismissed',
-          FailedToShow: 'onRewardedVideoAdFailedToShow',
-          FailedToLoad: 'onRewardedVideoAdFailedToLoad',
-        };
-
-        Promise.all([
-          _AdMob.addListener(events.Rewarded,     () => { earned = true; }),
-          _AdMob.addListener(events.Dismissed,    () => finish(earned)),
-          _AdMob.addListener(events.FailedToShow, () => finish(false)),
-          _AdMob.addListener(events.FailedToLoad, () => finish(false)),
-        ])
-          .then(async (subs) => {
-            handles = subs;
-            try {
-              await _AdMob.prepareRewardVideoAd({
-                adId:      this._rewardedId(),
-                isTesting: this._cfg.IS_TESTING,
-              });
-              await _AdMob.showRewardVideoAd();
-            } catch {
-              finish(false);
-            }
-          })
-          .catch(() => finish(false));
+      // 4 ── Iniciar la carga. El evento Loaded dispara showRewardVideoAd().
+      await _AdMob.prepareRewardVideoAd({
+        adId:      this._rewardedId(),
+        isTesting: this._cfg.IS_TESTING,
       });
     } catch {
-      return { completed: false };
+      // prepareRewardVideoAd() rechazó, o uno de los addListener() falló.
+      // finish() limpia todo lo que esté en subs hasta ese momento.
+      finish(false);
     }
+
+    return adPromise;
   }
 
   // ── DOM HELPERS ───────────────────────────────────────────
