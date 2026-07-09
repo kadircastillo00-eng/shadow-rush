@@ -15,11 +15,12 @@
 import { ADS_CONFIG } from './ads-config.js';
 
 // ── BRIDGE NATIVO: carga Capacitor + AdMob si estamos en APK ──
-let _AdMob                = null;
-let _BannerAdSize         = null;
-let _BannerAdPosition     = null;
-let _RewardAdPluginEvents = null;
-let _isNative             = false;
+let _AdMob                       = null;
+let _BannerAdSize                = null;
+let _BannerAdPosition            = null;
+let _RewardAdPluginEvents        = null;
+let _InterstitialAdPluginEvents  = null;
+let _isNative                    = false;
 
 const _nativeBridgeReady = (async () => {
   try {
@@ -30,10 +31,11 @@ const _nativeBridgeReady = (async () => {
     // API de @capacitor-community/admob v8: AdMob, enums y tipos se
     // exportan todos desde el paquete raíz (ver dist/esm/index.d.ts).
     const mod = await import('@capacitor-community/admob');
-    _AdMob                = mod.AdMob;
-    _BannerAdSize         = mod.BannerAdSize;
-    _BannerAdPosition     = mod.BannerAdPosition;
-    _RewardAdPluginEvents = mod.RewardAdPluginEvents;
+    _AdMob                       = mod.AdMob;
+    _BannerAdSize                = mod.BannerAdSize;
+    _BannerAdPosition            = mod.BannerAdPosition;
+    _RewardAdPluginEvents        = mod.RewardAdPluginEvents;
+    _InterstitialAdPluginEvents  = mod.InterstitialAdPluginEvents;
 
     await _AdMob.initialize({
       requestTrackingAuthorization: true,   // solo iOS
@@ -57,8 +59,9 @@ export class AdManager {
     this._gamesPlayed   = 0;
     this._nextThreshold = this._rollThreshold();
     this._lastInterMs   = 0;
-    this._overlay       = null;
-    this._bannerVisible = false;
+    this._overlay        = null;
+    this._bannerVisible  = false;
+    this._bannerCreated  = false;   // true after first showBanner(); use resumeBanner() after that
   }
 
   // ── IDs SEGÚN MODO ────────────────────────────────────────
@@ -125,13 +128,20 @@ export class AdManager {
     try {
       await _nativeBridgeReady;
       if (!_AdMob) return;
-      await _AdMob.showBanner({
-        adId:     this._bannerId(),
-        adSize:   _BannerAdSize?.ADAPTIVE_BANNER   ?? 'ADAPTIVE_BANNER',
-        position: _BannerAdPosition?.BOTTOM_CENTER ?? 'BOTTOM_CENTER',
-        margin:   0,
-        isTesting: this._cfg.IS_TESTING,
-      });
+      if (this._bannerCreated) {
+        // Banner ya existe en memoria: solo reactivarlo (no crear uno nuevo).
+        // Llamar showBanner() de nuevo apila vistas nativas o lanza error.
+        await _AdMob.resumeBanner();
+      } else {
+        await _AdMob.showBanner({
+          adId:      this._bannerId(),
+          adSize:    _BannerAdSize?.ADAPTIVE_BANNER   ?? 'ADAPTIVE_BANNER',
+          position:  _BannerAdPosition?.BOTTOM_CENTER ?? 'BOTTOM_CENTER',
+          margin:    0,
+          isTesting: this._cfg.IS_TESTING,
+        });
+        this._bannerCreated = true;
+      }
       document.body.classList.add('banner-visible');
     } catch { /* continua sin banner si falla */ }
   }
@@ -166,15 +176,51 @@ export class AdManager {
   }
 
   async _nativeInterstitial() {
+    // Flujo event-driven (mismo patrón que rewarded):
+    //   prepareInterstitial() inicia la descarga del ad.
+    //   El evento Loaded confirma que está listo → entonces showInterstitial().
+    //   Dismissed / FailedToShow / FailedToLoad → resuelven sin bloquear.
+    //   Watchdog de 30 s por si el SDK no emite ningún evento.
+    try { await _nativeBridgeReady; } catch { return; }
+    if (!_AdMob) return;
+
+    const ev = _InterstitialAdPluginEvents ?? {
+      Loaded:       'interstitialAdLoaded',
+      FailedToLoad: 'interstitialAdFailedToLoad',
+      Dismissed:    'interstitialAdDismissed',
+      FailedToShow: 'interstitialAdFailedToShow',
+    };
+
+    let _resolve;
+    const adPromise = new Promise(r => { _resolve = r; });
+    const subs      = [];
+    let settled     = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(watchdog);
+      subs.forEach(h => { try { h.remove(); } catch (_) {} });
+      _resolve();
+    };
+
+    const watchdog = setTimeout(finish, 30_000);
+
     try {
-      await _nativeBridgeReady;
-      if (!_AdMob) return;
+      subs.push(await _AdMob.addListener(ev.Loaded,       () => { _AdMob.showInterstitial().catch(finish); }));
+      subs.push(await _AdMob.addListener(ev.FailedToLoad, finish));
+      subs.push(await _AdMob.addListener(ev.FailedToShow, finish));
+      subs.push(await _AdMob.addListener(ev.Dismissed,    finish));
+
       await _AdMob.prepareInterstitial({
         adId:      this._interstitialId(),
         isTesting: this._cfg.IS_TESTING,
       });
-      await _AdMob.showInterstitial();
-    } catch { /* continua si falla */ }
+    } catch {
+      finish();
+    }
+
+    return adPromise;
   }
 
   // ── ANUNCIO RECOMPENSADO ───────────────────────────────────

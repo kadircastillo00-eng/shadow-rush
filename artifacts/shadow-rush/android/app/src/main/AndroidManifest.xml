@@ -44,4 +44,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required on Android 13+ (API 33+) for AdMob to access Advertising ID.
+         Without this, ad fill rate drops to near-zero on modern devices. -->
+    <uses-permission android:name="com.google.android.permission.AD_ID"/>
 </manifest>
