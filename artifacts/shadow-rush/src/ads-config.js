@@ -25,7 +25,7 @@ export const ADS_CONFIG = {
   // ── MODO PRUEBA ───────────────────────────────────────────
   // true  → usa IDs de prueba de Google (no genera ingresos, no hay riesgo de ban)
   // false → usa tus IDs reales (solo en producción)
-  IS_TESTING: false,
+  IS_TESTING: true,
 
   // IDs de anuncios de prueba de Google (no los cambies)
   TEST_INTERSTITIAL_ID: 'ca-app-pub-3940256099942544/1033173712',

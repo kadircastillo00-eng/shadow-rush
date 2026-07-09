@@ -37,13 +37,16 @@ const _nativeBridgeReady = (async () => {
     _RewardAdPluginEvents        = mod.RewardAdPluginEvents;
     _InterstitialAdPluginEvents  = mod.InterstitialAdPluginEvents;
 
+    console.log('[AdMob] Inicializando — IS_TESTING:', ADS_CONFIG.IS_TESTING);
     await _AdMob.initialize({
       requestTrackingAuthorization: true,   // solo iOS
       initializeForTesting: ADS_CONFIG.IS_TESTING,
     });
+    console.log('[AdMob] SDK inicializado correctamente');
 
     // Ajusta el padding inferior al tamaño real del banner nativo
     _AdMob.addListener('bannerAdSizeChanged', ({ height }) => {
+      console.log('[AdMob][Banner] Tamaño cambiado — height:', height);
       document.documentElement.style.setProperty('--admob-banner-h', height + 'px');
     });
   } catch {
@@ -129,15 +132,14 @@ export class AdManager {
       await _nativeBridgeReady;
       if (!_AdMob) return;
       if (this._bannerCreated) {
-        // Banner ya existe en memoria: solo reactivarlo (no crear uno nuevo).
-        // Llamar showBanner() de nuevo apila vistas nativas o lanza error.
+        console.log('[AdMob][Banner] resumeBanner() — reutilizando vista existente');
         await _AdMob.resumeBanner();
+        console.log('[AdMob][Banner] Mostrado (resume)');
       } else {
-        // Suscribir primero el listener de fallo asíncrono de carga.
-        // Si el SDK emite bannerAdFailedToLoad después de que showBanner()
-        // resuelve, reseteamos _bannerCreated para que el siguiente intento
-        // recree el banner en lugar de llamar resumeBanner() sobre una vista muerta.
-        _AdMob.addListener('bannerAdFailedToLoad', () => {
+        console.log('[AdMob][Banner] showBanner() — adId:', this._bannerId(), '| testing:', this._cfg.IS_TESTING);
+        _AdMob.addListener('bannerAdLoaded',       ()    => console.log('[AdMob][Banner] ✅ Cargado correctamente'));
+        _AdMob.addListener('bannerAdFailedToLoad', (err) => {
+          console.error('[AdMob][Banner] ❌ Error de carga:', JSON.stringify(err));
           this._bannerCreated = false;
           this._bannerVisible = false;
           document.body.classList.remove('banner-visible');
@@ -150,9 +152,12 @@ export class AdManager {
           isTesting: this._cfg.IS_TESTING,
         });
         this._bannerCreated = true;
+        console.log('[AdMob][Banner] Mostrado (nuevo)');
       }
       document.body.classList.add('banner-visible');
-    } catch { /* continua sin banner si falla */ }
+    } catch (e) {
+      console.error('[AdMob][Banner] ❌ Excepción en _nativeBannerShow:', e?.message ?? e);
+    }
   }
 
   async _nativeBannerHide() {
@@ -196,6 +201,8 @@ export class AdManager {
     try { await _nativeBridgeReady; } catch { return; }
     if (!_AdMob) return;
 
+    console.log('[AdMob][Interstitial] Preparando — adId:', this._interstitialId(), '| testing:', this._cfg.IS_TESTING);
+
     const ev = _InterstitialAdPluginEvents ?? {
       Loaded:       'interstitialAdLoaded',
       FailedToLoad: 'interstitialAdFailedToLoad',
@@ -216,22 +223,43 @@ export class AdManager {
       subs.forEach(h => { try { h.remove(); } catch (_) {} });
       // Marcar cooldown solo si el intersticial llegó a mostrarse y cerrarse.
       if (shown) this._markInterstitialShown();
+      console.log('[AdMob][Interstitial] Flujo terminado — mostrado:', shown);
       _resolve();
     };
 
-    const watchdog = setTimeout(finish, 30_000);
+    const watchdog = setTimeout(() => {
+      console.warn('[AdMob][Interstitial] ⚠️ Watchdog 30s — ningún evento recibido');
+      finish();
+    }, 30_000);
 
     try {
-      subs.push(await _AdMob.addListener(ev.Loaded,       () => { _AdMob.showInterstitial().catch(finish); }));
-      subs.push(await _AdMob.addListener(ev.FailedToLoad, finish));
-      subs.push(await _AdMob.addListener(ev.FailedToShow, finish));
-      subs.push(await _AdMob.addListener(ev.Dismissed,    () => { shown = true; finish(); }));
+      subs.push(await _AdMob.addListener(ev.Loaded, () => {
+        console.log('[AdMob][Interstitial] ✅ Cargado — llamando showInterstitial()');
+        _AdMob.showInterstitial().catch(err => {
+          console.error('[AdMob][Interstitial] ❌ showInterstitial() rechazado:', err?.message ?? err);
+          finish();
+        });
+      }));
+      subs.push(await _AdMob.addListener(ev.FailedToLoad, (err) => {
+        console.error('[AdMob][Interstitial] ❌ FailedToLoad:', JSON.stringify(err));
+        finish();
+      }));
+      subs.push(await _AdMob.addListener(ev.FailedToShow, (err) => {
+        console.error('[AdMob][Interstitial] ❌ FailedToShow:', JSON.stringify(err));
+        finish();
+      }));
+      subs.push(await _AdMob.addListener(ev.Dismissed, () => {
+        console.log('[AdMob][Interstitial] Dismissed — el usuario cerró el anuncio');
+        shown = true;
+        finish();
+      }));
 
       await _AdMob.prepareInterstitial({
         adId:      this._interstitialId(),
         isTesting: this._cfg.IS_TESTING,
       });
-    } catch {
+    } catch (e) {
+      console.error('[AdMob][Interstitial] ❌ Excepción:', e?.message ?? e);
       finish();
     }
 
@@ -265,6 +293,8 @@ export class AdManager {
     try { await _nativeBridgeReady; } catch { return { completed: false }; }
     if (!_AdMob) return { completed: false };
 
+    console.log('[AdMob][Rewarded] Preparando — adId:', this._rewardedId(), '| testing:', this._cfg.IS_TESTING);
+
     // Nombres de eventos del enum real de @capacitor-community/admob v8.
     // El fallback cubre el caso extremo en que el import dinámico falle.
     const ev = _RewardAdPluginEvents ?? {
@@ -293,11 +323,15 @@ export class AdManager {
       settled = true;
       clearTimeout(watchdog);
       subs.forEach(h => { try { h.remove(); } catch (_) {} });
+      console.log('[AdMob][Rewarded] Flujo terminado — completed:', completed);
       _resolve({ completed });
     };
 
     // Salvaguarda: 60 s sin eventos → fallo silencioso del SDK/OEM.
-    const watchdog = setTimeout(() => finish(false), 60_000);
+    const watchdog = setTimeout(() => {
+      console.warn('[AdMob][Rewarded] ⚠️ Watchdog 60s — ningún evento recibido');
+      finish(false);
+    }, 60_000);
 
     // 3 ── Registro SECUENCIAL de listeners.
     //       Cada handle se añade a subs inmediatamente con await+push.
@@ -307,28 +341,42 @@ export class AdManager {
     try {
       subs.push(await _AdMob.addListener(ev.Loaded, () => {
         // Loaded → el video está descargado; ahora sí es seguro mostrarlo.
-        _AdMob.showRewardVideoAd().catch(() => finish(false));
+        console.log('[AdMob][Rewarded] ✅ Cargado — llamando showRewardVideoAd()');
+        _AdMob.showRewardVideoAd().catch(err => {
+          console.error('[AdMob][Rewarded] ❌ showRewardVideoAd() rechazado:', err?.message ?? err);
+          finish(false);
+        });
       }));
-      subs.push(await _AdMob.addListener(ev.Rewarded, () => {
+      subs.push(await _AdMob.addListener(ev.Rewarded, (reward) => {
         // Rewarded → el usuario vio el anuncio completo y ganó la recompensa.
+        console.log('[AdMob][Rewarded] 🎁 Recompensa otorgada:', JSON.stringify(reward));
         earned = true;
       }));
       subs.push(await _AdMob.addListener(ev.Dismissed, () => {
         // Dismissed → el anuncio se cerró (con o sin recompensa).
         // completed = true solo si Rewarded se emitió antes que Dismissed.
+        console.log('[AdMob][Rewarded] Dismissed — earned:', earned);
         finish(earned);
       }));
-      subs.push(await _AdMob.addListener(ev.FailedToShow, () => finish(false)));
-      subs.push(await _AdMob.addListener(ev.FailedToLoad, () => finish(false)));
+      subs.push(await _AdMob.addListener(ev.FailedToShow, (err) => {
+        console.error('[AdMob][Rewarded] ❌ FailedToShow:', JSON.stringify(err));
+        finish(false);
+      }));
+      subs.push(await _AdMob.addListener(ev.FailedToLoad, (err) => {
+        console.error('[AdMob][Rewarded] ❌ FailedToLoad:', JSON.stringify(err));
+        finish(false);
+      }));
 
       // 4 ── Iniciar la carga. El evento Loaded dispara showRewardVideoAd().
       await _AdMob.prepareRewardVideoAd({
         adId:      this._rewardedId(),
         isTesting: this._cfg.IS_TESTING,
       });
-    } catch {
+      console.log('[AdMob][Rewarded] prepareRewardVideoAd() enviado — esperando evento Loaded...');
+    } catch (e) {
       // prepareRewardVideoAd() rechazó, o uno de los addListener() falló.
       // finish() limpia todo lo que esté en subs hasta ese momento.
+      console.error('[AdMob][Rewarded] ❌ Excepción:', e?.message ?? e);
       finish(false);
     }
 
