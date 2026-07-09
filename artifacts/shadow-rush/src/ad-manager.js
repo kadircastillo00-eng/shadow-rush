@@ -133,6 +133,15 @@ export class AdManager {
         // Llamar showBanner() de nuevo apila vistas nativas o lanza error.
         await _AdMob.resumeBanner();
       } else {
+        // Suscribir primero el listener de fallo asíncrono de carga.
+        // Si el SDK emite bannerAdFailedToLoad después de que showBanner()
+        // resuelve, reseteamos _bannerCreated para que el siguiente intento
+        // recree el banner en lugar de llamar resumeBanner() sobre una vista muerta.
+        _AdMob.addListener('bannerAdFailedToLoad', () => {
+          this._bannerCreated = false;
+          this._bannerVisible = false;
+          document.body.classList.remove('banner-visible');
+        });
         await _AdMob.showBanner({
           adId:      this._bannerId(),
           adSize:    _BannerAdSize?.ADAPTIVE_BANNER   ?? 'ADAPTIVE_BANNER',
@@ -169,7 +178,9 @@ export class AdManager {
 
   // ── INTERSTICIAL ──────────────────────────────────────────
   showInterstitial() {
-    this._markInterstitialShown();
+    // _markInterstitialShown() se llama solo cuando el ad realmente se mostró
+    // (evento Dismissed en _nativeInterstitial, o al resolver en simulación).
+    // Así no se consume el cooldown/contador si el ad falla al cargar.
     return _isNative && _AdMob
       ? this._nativeInterstitial()
       : this._simulateInterstitial();
@@ -179,7 +190,8 @@ export class AdManager {
     // Flujo event-driven (mismo patrón que rewarded):
     //   prepareInterstitial() inicia la descarga del ad.
     //   El evento Loaded confirma que está listo → entonces showInterstitial().
-    //   Dismissed / FailedToShow / FailedToLoad → resuelven sin bloquear.
+    //   Dismissed → el ad se mostró y cerró → marcar cooldown aquí (no antes).
+    //   FailedToLoad / FailedToShow → resuelve sin tocar el cooldown.
     //   Watchdog de 30 s por si el SDK no emite ningún evento.
     try { await _nativeBridgeReady; } catch { return; }
     if (!_AdMob) return;
@@ -195,12 +207,15 @@ export class AdManager {
     const adPromise = new Promise(r => { _resolve = r; });
     const subs      = [];
     let settled     = false;
+    let shown       = false;   // true cuando el SDK confirma que el ad se mostró
 
     const finish = () => {
       if (settled) return;
       settled = true;
       clearTimeout(watchdog);
       subs.forEach(h => { try { h.remove(); } catch (_) {} });
+      // Marcar cooldown solo si el intersticial llegó a mostrarse y cerrarse.
+      if (shown) this._markInterstitialShown();
       _resolve();
     };
 
@@ -210,7 +225,7 @@ export class AdManager {
       subs.push(await _AdMob.addListener(ev.Loaded,       () => { _AdMob.showInterstitial().catch(finish); }));
       subs.push(await _AdMob.addListener(ev.FailedToLoad, finish));
       subs.push(await _AdMob.addListener(ev.FailedToShow, finish));
-      subs.push(await _AdMob.addListener(ev.Dismissed,    finish));
+      subs.push(await _AdMob.addListener(ev.Dismissed,    () => { shown = true; finish(); }));
 
       await _AdMob.prepareInterstitial({
         adId:      this._interstitialId(),
