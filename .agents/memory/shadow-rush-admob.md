@@ -5,18 +5,31 @@ description: Correct event names and API for @capacitor-community/admob v8 rewar
 
 ## The rule
 `@capacitor-community/admob` v8 rewarded-ad events use these names (via `RewardAdPluginEvents` enum):
+- `onRewardedVideoAdLoaded` — video ready to show (Loaded)
 - `onRewardedVideoAdReward` — reward earned (fires only on full view)
 - `onRewardedVideoAdDismissed` — ad closed (fires on full view OR early close)
-- `onRewardedVideoAdFailedToShow` — show failure
-- `onRewardedVideoAdFailedToLoad` — load failure
+- `onRewardedVideoAdFailedToShow` / `onRewardedVideoAdFailedToLoad` — failures
 
-**Why:** The old code used `onRewardedVideoAdRewardedEvent` and `onRewardedVideoAdClosed` — neither exists in v8. These events never fired, leaving the promise unresolved and breaking the "watch ad to revive" flow.
+**Why:** Two bugs were found across sessions:
+1. Old code used non-existent event names (`onRewardedVideoAdRewardedEvent`, `onRewardedVideoAdClosed`).
+2. Even with correct event names, using `Promise.all([addListeners]).then(subs => handles=subs)` creates a race: if `.then()` never runs (addListener error), handles are lost and ghost listeners persist across games.
 
-**How to apply:** Always import `RewardAdPluginEvents` from `@capacitor-community/admob` and reference enum values — never hardcode event name strings. Use a `settled` guard + listener cleanup in the promise to prevent double-resolve or leaks. Add a 60s watchdog timeout in case OEM/SDK never emits dismissal.
+**How to apply:** Use **sequential `await`+`push` per `addListener`** so each handle is stored immediately. Never use Promise.all then-assignment for cleanup-critical handles. Expose the Promise resolve externally (`let _resolve; new Promise(r => { _resolve = r; })`) to avoid async-executor anti-pattern. Use `Loaded` event (not sequential await of `prepareRewardVideoAd`) as the trigger for `showRewardVideoAd()`.
+
+## Correct v8 pattern for rewarded ad
+```js
+// Sequential registration — each handle captured before next addListener
+subs.push(await AdMob.addListener(ev.Loaded,       () => AdMob.showRewardVideoAd().catch(() => finish(false))));
+subs.push(await AdMob.addListener(ev.Rewarded,     () => { earned = true; }));
+subs.push(await AdMob.addListener(ev.Dismissed,    () => finish(earned)));
+subs.push(await AdMob.addListener(ev.FailedToShow, () => finish(false)));
+subs.push(await AdMob.addListener(ev.FailedToLoad, () => finish(false)));
+await AdMob.prepareRewardVideoAd({ adId, isTesting }); // Loaded event triggers show
+```
 
 ## Method names (correct in v8)
-- `prepareRewardVideoAd({ adId, isTesting })` — loads the ad
-- `showRewardVideoAd()` — shows it (resolves when shown, not when closed)
+- `prepareRewardVideoAd({ adId, isTesting })` — starts loading; `Loaded` event signals ready
+- `showRewardVideoAd()` — shows it; call ONLY from Loaded handler
 - `prepareInterstitial({ adId, isTesting })` + `showInterstitial()` — correct as-is
 - `showBanner({ adId, adSize, position, margin, isTesting })` + `hideBanner()` — correct as-is
 
