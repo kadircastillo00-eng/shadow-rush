@@ -109,6 +109,15 @@ export class AdManager {
   async showBanner() {
     if (this._bannerVisible) return;
     this._bannerVisible = true;
+    // IMPORTANTE: showBanner() se llama muy temprano (cada refresco del menú,
+    // justo al arrancar el juego), antes de que _nativeBridgeReady resuelva
+    // Capacitor.isNativePlatform(). Sin este await, _isNative todavía es
+    // `false` en ese instante y el banner cae siempre en la simulación web,
+    // aunque estemos corriendo en la APK nativa. rewarded/interstitial no
+    // sufren esto porque se disparan más tarde (tras jugar una partida),
+    // cuando el bridge ya está listo.
+    try { await _nativeBridgeReady; } catch { /* noop, cae a simulación */ }
+    if (!this._bannerVisible) return; // se pudo haber ocultado mientras esperábamos
     if (_isNative && _AdMob) {
       await this._nativeBannerShow();
     } else {
@@ -120,6 +129,7 @@ export class AdManager {
   async hideBanner() {
     if (!this._bannerVisible) return;
     this._bannerVisible = false;
+    try { await _nativeBridgeReady; } catch { /* noop */ }
     if (_isNative && _AdMob) {
       await this._nativeBannerHide();
     } else {
