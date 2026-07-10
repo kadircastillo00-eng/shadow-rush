@@ -55,6 +55,17 @@ const _nativeBridgeReady = (async () => {
   }
 })();
 
+// Extrae code/message/domain de un LoadAdError/AdMobError del SDK nativo
+// y los imprime de forma explícita — JSON.stringify() por sí solo puede
+// omitir campos según cómo el bridge nativo serialice el objeto de error.
+function _logAdError(tag, err) {
+  const code    = err?.code    ?? err?.errorCode    ?? '(sin código)';
+  const message = err?.message ?? err?.errorMessage ?? '(sin mensaje)';
+  const domain  = err?.domain  ?? '(sin dominio)';
+  console.error(`${tag} code=${code} | domain=${domain} | message="${message}"`);
+  console.error(`${tag} raw:`, JSON.stringify(err));
+}
+
 // ── CLASE PRINCIPAL ───────────────────────────────────────────
 export class AdManager {
   constructor() {
@@ -149,7 +160,7 @@ export class AdManager {
         console.log('[AdMob][Banner] showBanner() — adId:', this._bannerId(), '| testing:', this._cfg.IS_TESTING);
         _AdMob.addListener('bannerAdLoaded',       ()    => console.log('[AdMob][Banner] ✅ Cargado correctamente'));
         _AdMob.addListener('bannerAdFailedToLoad', (err) => {
-          console.error('[AdMob][Banner] ❌ Error de carga:', JSON.stringify(err));
+          _logAdError('[AdMob][Banner] ❌ FailedToLoad', err);
           this._bannerCreated = false;
           this._bannerVisible = false;
           document.body.classList.remove('banner-visible');
@@ -251,11 +262,11 @@ export class AdManager {
         });
       }));
       subs.push(await _AdMob.addListener(ev.FailedToLoad, (err) => {
-        console.error('[AdMob][Interstitial] ❌ FailedToLoad:', JSON.stringify(err));
+        _logAdError('[AdMob][Interstitial] ❌ FailedToLoad', err);
         finish();
       }));
       subs.push(await _AdMob.addListener(ev.FailedToShow, (err) => {
-        console.error('[AdMob][Interstitial] ❌ FailedToShow:', JSON.stringify(err));
+        _logAdError('[AdMob][Interstitial] ❌ FailedToShow', err);
         finish();
       }));
       subs.push(await _AdMob.addListener(ev.Dismissed, () => {
@@ -369,11 +380,11 @@ export class AdManager {
         finish(earned);
       }));
       subs.push(await _AdMob.addListener(ev.FailedToShow, (err) => {
-        console.error('[AdMob][Rewarded] ❌ FailedToShow:', JSON.stringify(err));
+        _logAdError('[AdMob][Rewarded] ❌ FailedToShow', err);
         finish(false);
       }));
       subs.push(await _AdMob.addListener(ev.FailedToLoad, (err) => {
-        console.error('[AdMob][Rewarded] ❌ FailedToLoad:', JSON.stringify(err));
+        _logAdError('[AdMob][Rewarded] ❌ FailedToLoad', err);
         finish(false);
       }));
 
