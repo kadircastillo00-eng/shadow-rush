@@ -6,3 +6,9 @@ id = "YIg28MeUtPn834VAe-VdK"
 uri = "file://downloads/shadow-rush-project.zip"
 type = "unspecified"
 title = "Shadow Rush — proyecto completo (con correcciones AdMob v8)"
+
+[[outputs]]
+id = "jCNVvpsLVtJJ9X7nxh03_"
+uri = "file://downloads/shadow-rush-debug.apk"
+type = "unspecified"
+title = "Shadow Rush — APK de depuración (con panel AdMob)"
