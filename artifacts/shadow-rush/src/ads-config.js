@@ -33,7 +33,7 @@ export const ADS_CONFIG = {
   // ── IDs REALES DE ADMOB ───────────────────────────────────
   APP_ID:          'ca-app-pub-1783386752606440~3992016204',
   INTERSTITIAL_ID: 'ca-app-pub-1783386752606440/2922477112',
-  REWARDED_ID:     'ca-app-pub-1783386752606440/5357068766',
+  REWARDED_ID:     'ca-app-pub-1783386752606440/4384706366',
   BANNER_ID:       'ca-app-pub-1783386752606440/3447266892',
 
   // ── MODO PRUEBA ───────────────────────────────────────────
