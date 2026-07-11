@@ -330,6 +330,19 @@
     <span class="ad-banner-text">Banner AdMob — configura tu BANNER_ID en ads-config.js</span>
   </div>
 
+  <!-- ── PANEL DE DEPURACIÓN ADMOB (visible en el teléfono, sin PC) ── -->
+  <button id="admob-debug-toggle" aria-label="Panel de depuración AdMob">🐞</button>
+  <div id="admob-debug-panel" class="hidden">
+    <div class="admob-debug-header">
+      <span>🐞 AdMob Debug</span>
+      <div class="admob-debug-actions">
+        <button id="admob-debug-clear">Limpiar</button>
+        <button id="admob-debug-close">✕</button>
+      </div>
+    </div>
+    <div id="admob-debug-log"></div>
+  </div>
+
   <script type="module" src="/src/game.js"></script>
   <script>
     if ('serviceWorker' in navigator) {

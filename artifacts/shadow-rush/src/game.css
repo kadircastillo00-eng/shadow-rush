@@ -375,3 +375,42 @@ body.banner-visible #start-screen {
   font-family:var(--font-g); font-size:22px; font-weight:900;
   color:var(--gold); text-shadow:0 0 12px var(--gold);
 }
+
+/* ── PANEL DE DEPURACIÓN ADMOB (visible en el teléfono, sin PC) ── */
+#admob-debug-toggle {
+  position: fixed; bottom: 12px; left: 12px; z-index: 9998;
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(20,20,30,0.75); color: #fff; font-size: 18px;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0.55;
+}
+#admob-debug-panel {
+  position: fixed; left: 8px; right: 8px; bottom: 60px; max-height: 55vh;
+  z-index: 9999;
+  background: rgba(10,10,16,0.94);
+  border: 1px solid rgba(255,255,255,0.2); border-radius: 10px;
+  color: #eaeaea; font-family: monospace; font-size: 11px;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#admob-debug-panel.hidden { display: none; }
+.admob-debug-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px; background: rgba(255,255,255,0.06);
+  font-family: var(--font-u); font-weight: 600; font-size: 13px;
+}
+.admob-debug-actions button {
+  margin-left: 6px; background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2); color: #fff;
+  border-radius: 6px; padding: 3px 8px; font-size: 11px;
+}
+#admob-debug-log {
+  overflow-y: auto; padding: 6px 10px 10px;
+  white-space: pre-wrap; word-break: break-word; line-height: 1.4;
+}
+.admob-debug-entry { border-bottom: 1px solid rgba(255,255,255,0.08); padding: 5px 0; }
+.admob-debug-entry.err  { color: #ff8a8a; }
+.admob-debug-entry.ok   { color: #8fffb0; }
+.admob-debug-entry.warn { color: #ffd479; }
+.admob-debug-entry.info { color: #9fc9ff; }
+.admob-debug-ts { color: #888; margin-right: 6px; }

@@ -13,6 +13,7 @@
 //  No se necesita ningún cambio de código al cambiar de modo.
 // ═══════════════════════════════════════════════════════════
 import { ADS_CONFIG } from './ads-config.js';
+import { admobDebugLog, admobDebugLogError } from './admob-debug-panel.js';
 
 // ── BRIDGE NATIVO: carga Capacitor + AdMob si estamos en APK ──
 let _AdMob                       = null;
@@ -64,6 +65,9 @@ function _logAdError(tag, err) {
   const domain  = err?.domain  ?? '(sin dominio)';
   console.error(`${tag} code=${code} | domain=${domain} | message="${message}"`);
   console.error(`${tag} raw:`, JSON.stringify(err));
+  // Refleja el mismo error en el panel visible en pantalla, para poder
+  // depurar directamente desde el teléfono sin adb/PC.
+  admobDebugLogError(tag, err);
 }
 
 // ── CLASE PRINCIPAL ───────────────────────────────────────────
@@ -158,7 +162,11 @@ export class AdManager {
         console.log('[AdMob][Banner] Mostrado (resume)');
       } else {
         console.log('[AdMob][Banner] showBanner() — adId:', this._bannerId(), '| testing:', this._cfg.IS_TESTING);
-        _AdMob.addListener('bannerAdLoaded',       ()    => console.log('[AdMob][Banner] ✅ Cargado correctamente'));
+        admobDebugLog('info', `[Banner] Solicitando — adId=${this._bannerId()} testing=${this._cfg.IS_TESTING}`);
+        _AdMob.addListener('bannerAdLoaded', () => {
+          console.log('[AdMob][Banner] ✅ Cargado correctamente');
+          admobDebugLog('ok', '[Banner] ✅ Cargado correctamente');
+        });
         _AdMob.addListener('bannerAdFailedToLoad', (err) => {
           _logAdError('[AdMob][Banner] ❌ FailedToLoad', err);
           this._bannerCreated = false;
