@@ -6,9 +6,23 @@
 //  INSTRUCCIONES:
 //  1. Ve a https://admob.google.com → Apps → Agregar app → Android
 //  2. Copia tu App ID  (formato: ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX)
-//  3. Crea dos Ad Units: "Interstitial" y "Rewarded Video"
+//  3. Crea tres Ad Units: "Banner", "Interstitial" y "Rewarded"
 //  4. Pega los IDs abajo
 //  5. Copia el mismo App ID en capacitor.config.ts → plugins.AdMob.appId
+//
+//  ⚠️ OJO CON "REWARDED" vs "REWARDED INTERSTITIAL":
+//  AdMob ofrece DOS formatos parecidos en la sección de anuncios
+//  recompensados:
+//    • "Rewarded"              ← el que usa este juego (video que el
+//                                 usuario elige ver a cambio de una
+//                                 recompensa). Usa este.
+//    • "Rewarded interstitial" ← formato distinto, con otra API nativa
+//                                 (prepareRewardInterstitialAd). Si
+//                                 REWARDED_ID pertenece a este tipo,
+//                                 el SDK falla con el error:
+//                                 "Ad unit doesn't match format".
+//  Verifica el tipo del ad unit en AdMob → Anuncios → (tu unidad) →
+//  columna "Formato de anuncio" — debe decir exactamente "Rewarded".
 //
 //  INTEGRACIÓN NATIVA (APK con Capacitor):
 //  — Lee BUILD_ANDROID.md para las instrucciones completas

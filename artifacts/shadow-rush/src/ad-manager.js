@@ -68,6 +68,19 @@ function _logAdError(tag, err) {
   // Refleja el mismo error en el panel visible en pantalla, para poder
   // depurar directamente desde el teléfono sin adb/PC.
   admobDebugLogError(tag, err);
+
+  // Pista accionable para el error clásico de formato incorrecto de
+  // ad unit (p. ej. un ID "Rewarded interstitial" usado como "Rewarded",
+  // o un ID de Banner/Interstitial usado en el slot equivocado).
+  if (/doesn.?t match format/i.test(String(message))) {
+    const hint =
+      `${tag} 💡 El Ad Unit ID no coincide con el formato esperado. ` +
+      `Revisa en AdMob → Anuncios que el ID usado aquí sea del tipo ` +
+      `exacto "Rewarded" (no "Rewarded interstitial", "Interstitial" ` +
+      `ni "Banner"), y que no esté duplicado con otro slot.`;
+    console.warn(hint);
+    admobDebugLog('warn', hint);
+  }
 }
 
 // ── CLASE PRINCIPAL ───────────────────────────────────────────
