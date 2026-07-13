@@ -4,15 +4,18 @@
 const CACHE_NAME = 'shadow-rush-v1';
 const RUNTIME_CACHE = 'shadow-rush-runtime-v1';
 
-// Assets to pre-cache on install
+// Assets to pre-cache on install.
+// Resolved relative to this file's own location (self.location), so this
+// works whether the game is served from the domain root or a sub-path
+// (e.g. GitHub Pages project sites at https://user.github.io/repo/).
 const PRECACHE_ASSETS = [
-  '/',
-  '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/icon-maskable-512.png',
-  '/icons/apple-touch-icon.png',
-];
+  './',
+  'manifest.json',
+  'icons/icon-192.png',
+  'icons/icon-512.png',
+  'icons/icon-maskable-512.png',
+  'icons/apple-touch-icon.png',
+].map(path => new URL(path, self.location).href);
 
 // Install: pre-cache essential assets
 self.addEventListener('install', event => {
