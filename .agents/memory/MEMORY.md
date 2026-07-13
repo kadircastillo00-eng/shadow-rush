@@ -1,2 +1,3 @@
 - [Shadow Rush audio architecture](shadow-rush-audio.md) — music bus separates BGM fades from SFX; _mg() for music, _g() for SFX; _bass/_melody had g.gain.gain double-indirection bug in original
 - [Shadow Rush AdMob v8 event names](shadow-rush-admob.md) — wrong event names broke revive flow; correct v8 names via RewardAdPluginEvents enum + 60s watchdog pattern
+- [Shadow Rush AI Demo mode](shadow-rush-ai-demo.md) — `aiDemo` autopilot for recording: never dies, no ads, safe-band gap steering; preserve when touching death/collision code

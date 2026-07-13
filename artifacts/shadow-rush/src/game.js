@@ -1413,6 +1413,13 @@ class ShadowRush {
     this._reviveUsed    = false;
     this._reviveTimerId = null;
     this._adPending     = false;
+    // ── DEMO IA (solo grabación) ──────────────────────────────
+    // Cuando está activo: la IA controla al personaje, nunca muere,
+    // no se muestran anuncios y la partida corre de forma infinita
+    // mostrando todos los escenarios/efectos. El modo normal para
+    // jugadores humanos no se ve afectado — this.aiDemo empieza en
+    // false y solo se activa desde ajustes o ?demo=1 en la URL.
+    this.aiDemo = false;
     this._scoreF= 0; this.score=0; this.coins=0;
     this.stage=1; this.stageTimer=0; this.elapsed=0;
     this.combo=0; this.maxCombo=0; this.comboTimer=0;
@@ -1487,7 +1494,8 @@ class ShadowRush {
     if(this._adPending) return;
     this._adPending = true;
     try {
-      if(this.adMgr.onNewGame()){
+      // Demo IA: sin anuncios — la grabación debe correr sin interrupciones.
+      if(!this.aiDemo && this.adMgr.onNewGame()){
         await this.adMgr.showInterstitial();
       }
       this._beginCountdown();
@@ -1585,7 +1593,8 @@ class ShadowRush {
     this.audio.setStage(this.stage);
     this.audio.setWorld(newWorldIdx);
     // Intersticial al cambiar de mundo (probabilístico + cooldown)
-    if(worldChanged && this.adMgr.onWorldChange()){
+    // Demo IA: sin anuncios — la grabación debe correr sin interrupciones.
+    if(!this.aiDemo && worldChanged && this.adMgr.onWorldChange()){
       this.audio.stopBGM(0.2);
       await this.adMgr.showInterstitial();
       this.lastTime=performance.now(); // evitar salto de dt tras el anuncio
@@ -1605,6 +1614,9 @@ class ShadowRush {
 
   _die(){
     if(this.state!=='playing')return;
+    // Demo IA: red de seguridad — el personaje jamás muere en este modo,
+    // sin importar lo que decida el controlador de la IA.
+    if(this.aiDemo) return;
     if(this.shield){
       this.shield=false;this.shakeStr=12;
       this._hideEventBanners();this.audio.play('die');vibrate([100]);return;
@@ -1881,6 +1893,7 @@ class ShadowRush {
     if(this.shakeStr>0){this.shakeX=(Math.random()-.5)*this.shakeStr*2;this.shakeY=(Math.random()-.5)*this.shakeStr*2;this.shakeStr=Math.max(0,this.shakeStr-60*rawDt);}
     else{this.shakeX=0;this.shakeY=0;}
 
+    if(this.aiDemo) this._aiControl(dt);
     this._updatePlayer(dt);this._spawnObstacles(rawDt);this._updateObstacles(dt);
     this._spawnCoins(rawDt);this._updateCoins(dt);this._updateParticles(rawDt);
     this._checkCollisions();this._updateHUD();
@@ -1938,6 +1951,76 @@ class ShadowRush {
     this.floatTexts=this.floatTexts.filter(f=>f.life>0);
     if(this.floatTexts.length>this._maxFloatTexts) this.floatTexts.splice(0,this.floatTexts.length-this._maxFloatTexts);
   }
+  // ═══════════════════════════════════════════════════════
+  //  DEMO IA — controlador automático (solo grabación)
+  //  Estrategia: localiza el próximo hueco entre obstáculos y usa una
+  //  predicción balística de corto alcance (mismo integrador que
+  //  _updatePlayer) para decidir si saltar, manteniéndose siempre
+  //  dentro de una banda segura del hueco. Si no hay obstáculos
+  //  cercanos, mantiene al personaje en una franja central para que
+  //  se vea bien en cámara.
+  // ═══════════════════════════════════════════════════════
+  _aiFindGap(){
+    const p=this.player;
+    const groups=new Map();
+    for(const o of this.obstacles){
+      if(o.x+o.w < p.x-4) continue; // ya lo pasamos
+      const key=Math.round(o.x);
+      let g=groups.get(key);
+      if(!g){ g={x:o.x, top:null, bottom:null}; groups.set(key,g); }
+      if(o.y<=0.5) g.top=o; else g.bottom=o;
+    }
+    let best=null,bestX=Infinity;
+    for(const g of groups.values()){
+      if(g.top && g.bottom && g.x<bestX){ bestX=g.x; best=g; }
+    }
+    return best;
+  }
+  _aiControl(dt){
+    if(!this.player) return;
+    const p=this.player;
+    const grav=this.currentRule.id==='gravity_flip'?-1:1;
+    const hs=p.size*.68, margin=hs+16;
+    const H=this.H;
+
+    const gap=this._aiFindGap();
+    let safeTop,safeBottom;
+    if(gap){
+      safeTop=gap.top.h+margin;
+      safeBottom=gap.bottom.y-margin;
+      if(safeTop>safeBottom){ const c=(gap.top.h+gap.bottom.y)/2; safeTop=c-2; safeBottom=c+2; }
+    } else {
+      safeTop=H*0.32; safeBottom=H*0.62; // franja de "reposo" para que se vea natural en cámara
+    }
+
+    // Predicción balística de corto alcance sin más saltos (mismo esquema
+    // de integración que _updatePlayer) para anticipar si nos saldríamos
+    // de la banda segura antes de que llegue el obstáculo.
+    const step=Math.max(dt,1/120);
+    const T=0.16;
+    const steps=Math.max(1,Math.round(T/step));
+    let sy=p.y, svy=p.vy;
+    for(let i=0;i<steps;i++){ svy+=1600*grav*step; sy+=svy*step; }
+
+    let shouldJump=false;
+    if(grav>0){ if(sy>safeBottom) shouldJump=true; }
+    else      { if(sy<safeTop)    shouldJump=true; }
+
+    // Anulación de emergencia: si YA estamos casi en el borde de caída,
+    // saltar sin importar nada más — prioridad absoluta es no morir.
+    const emergency = (grav>0 && p.y>safeBottom-4) || (grav<0 && p.y<safeTop+4);
+    if(emergency) shouldJump=true;
+
+    // Evita saltos preventivos innecesarios si ya estamos pegados al
+    // borde opuesto (para no atravesar la pared contraria del hueco).
+    if(shouldJump && !emergency){
+      if(grav>0 && p.y<safeTop+margin*0.6) shouldJump=false;
+      if(grav<0 && p.y>safeBottom-margin*0.6) shouldJump=false;
+    }
+
+    if(shouldJump) this._playerJump();
+  }
+
   _checkCollisions(){
     if(!this.player)return;
     const p=this.player,hs=p.size*.68;
@@ -1987,7 +2070,8 @@ class ShadowRush {
     document.getElementById('daily-reward-btn').classList.toggle('hidden',!this.daily.canClaim());
     document.getElementById('wheel-btn').classList.toggle('highlight',this.wheel.canSpin());
     // Muestra el banner solo cuando el menú principal está activo
-    if(this.state==='menu') this.adMgr.showBanner();
+    // (nunca en Demo IA — la grabación debe correr sin interrupciones)
+    if(this.state==='menu' && !this.aiDemo) this.adMgr.showBanner();
   }
   _updateAudioUI(){
     // Master volume
@@ -2022,6 +2106,22 @@ class ShadowRush {
     if (musicTgl) { musicTgl.textContent=this.audio.getMusic()?'ON':'OFF'; musicTgl.className='toggle-btn'+(this.audio.getMusic()?' on':''); }
     const sfxTgl = document.getElementById('sfx-toggle');
     if (sfxTgl) { sfxTgl.textContent=this.audio.getSFX()?'ON':'OFF'; sfxTgl.className='toggle-btn'+(this.audio.getSFX()?' on':''); }
+    this._updateAiDemoUI();
+  }
+
+  _updateAiDemoUI(){
+    const tgl=document.getElementById('ai-demo-toggle');
+    if(tgl){ tgl.textContent=this.aiDemo?'ON':'OFF'; tgl.className='toggle-btn'+(this.aiDemo?' on':''); }
+  }
+
+  // Activa/desactiva el modo Demo IA. Solo afecta a esta sesión (no se
+  // guarda en localStorage) — pensado para grabar clips, nunca para el
+  // uso normal de los jugadores.
+  setAiDemo(on){
+    this.aiDemo=!!on;
+    this._updateAiDemoUI();
+    // Oculta el banner de anuncios de inmediato si se activa desde el menú
+    if(this.aiDemo) this.adMgr.hideBanner();
   }
 
   // ── RENDER ───────────────────────────────────────────────
@@ -2187,6 +2287,7 @@ class ShadowRush {
     this._btn('music-toggle',  ()=>{ this.audio.setMusic(!this.audio.getMusic()); this._updateAudioUI(); });
     this._btn('sfx-toggle',    ()=>{ this.audio.setSFX(!this.audio.getSFX()); this._updateAudioUI(); });
     this._btn('mute-all-btn',  ()=>{ this.audio.setMuted(!this.audio.getMuted()); this._updateAudioUI(); });
+    this._btn('ai-demo-toggle',()=>{ this.setAiDemo(!this.aiDemo); });
     this._btn('close-settings-btn', ()=>this._closeModal('settings-modal'));
 
     // ── Shop tabs ──
@@ -2398,6 +2499,17 @@ class ShadowRush {
 window.addEventListener('DOMContentLoaded', () => {
   document.body.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
   const game = new ShadowRush();
+  window.__shadowRushGame = game; // exposición mínima para depuración/QA manual
+
+  // ── Demo IA vía URL (?demo=1) ──────────────────────────────
+  // Atajo pensado para quien grabe el video: abre la app con
+  // ?demo=1 y arranca directo en Demo IA sin tocar los ajustes.
+  // No afecta a jugadores normales — sin el parámetro, todo sigue igual.
+  try {
+    if (new URLSearchParams(location.search).get('demo') === '1') {
+      game.setAiDemo(true);
+    }
+  } catch (_) { /* URLSearchParams no disponible — se ignora */ }
 
   // Start menu BGM once user unlocks audio (on first interaction)
   const startMenu = () => {
